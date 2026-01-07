@@ -8,13 +8,16 @@ signal verification_complete(is_valid: bool)
 
 # Backend URL
 var backend_url := "http://localhost:30820"
-var http_client: HTTPClient = null
+var http_request: HTTPRequest = null
 
 # Token storage
 const TOKEN_SAVE_PATH := "user://tinybox_token.json"
 
 func _ready() -> void:
-	http_client = HTTPClient.new()
+	# Create HTTPRequest node for making requests
+	http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.request_completed.connect(_on_http_request_completed)
 
 ## Register a new user
 func register_user(username: String, email: String, password: String) -> void:
@@ -88,67 +91,80 @@ func clear_saved_token() -> void:
 ## Private helper to make HTTP requests
 func _make_request(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
 	var url: String = backend_url + endpoint
-	var error: int = http_client.connect_to_host("localhost", 30820)
-
-	if error != OK:
-		authentication_failed.emit("Connection failed")
-		return
-
-	# Wait for connection
-	await get_tree().process_frame
-
-	var request_headers: Array = [
+	var request_headers: PackedStringArray = PackedStringArray([
 		"Content-Type: application/json",
 		"User-Agent: Godot/4.0 (Tinybox)"
-	]
-	request_headers.append_array(headers)
+	])
+
+	# Add custom headers
+	for header: String in headers:
+		request_headers.append(header)
 
 	var request_body: String = JSON.stringify(body) if body else ""
 
-	error = http_client.request(HTTPClient.METHOD_POST if method == "POST" else HTTPClient.METHOD_GET, endpoint, PackedStringArray(request_headers), request_body)
+	# Convert method string to HTTPClient enum
+	var http_method: HTTPClient.Method = HTTPClient.METHOD_POST if method == "POST" else HTTPClient.METHOD_GET
+
+	print("Making request to: ", url)
+	print("Method: ", method)
+	print("Body: ", request_body)
+
+	var error: int = http_request.request(url, request_headers, http_method, request_body)
 
 	if error != OK:
-		authentication_failed.emit("Request failed")
+		print("HTTP Request error: ", error)
+		authentication_failed.emit("Request failed: " + str(error))
 		return
 
-	# Wait for response
-	while http_client.get_status() == HTTPClient.STATUS_REQUESTING:
-		await get_tree().process_frame
+## Handle HTTP response
+func _on_http_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	print("HTTP Response - Code: ", response_code, " Result: ", result)
 
-	if http_client.get_status() != HTTPClient.STATUS_BODY:
-		authentication_failed.emit("Invalid response")
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Request failed with result: ", result)
+		authentication_failed.emit("Network error")
 		return
 
-	var response_text: String = ""
-	while http_client.get_status() == HTTPClient.STATUS_BODY:
-		response_text += http_client.read_response_body_chunk().get_string_from_utf8()
+	if response_code != 200:
+		print("Server returned error code: ", response_code)
+		var error_text: String = body.get_string_from_utf8()
+		print("Error response: ", error_text)
 
-	http_client.close()
+		# Try to parse error from response
+		var json: JSON = JSON.new()
+		var response_data: Variant = json.parse_string(error_text)
+		if response_data and response_data.has("error"):
+			authentication_failed.emit(response_data["error"])
+		else:
+			authentication_failed.emit("Server error: " + str(response_code))
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	print("Response body: ", response_text)
 
 	var json: JSON = JSON.new()
 	var response_data: Variant = json.parse_string(response_text)
 
 	if not response_data:
+		print("Failed to parse response")
 		authentication_failed.emit("Invalid response format")
 		return
 
-	# Handle response based on endpoint
-	if endpoint == "/api/auth/register" or endpoint == "/api/auth/login":
-		if response_data.has("error"):
-			authentication_failed.emit(response_data["error"])
-		elif response_data.has("token") and response_data.has("user"):
-			var token: String = response_data["token"]
-			var username: String = response_data["user"]["username"]
-			save_token(token, username)
-			authentication_complete.emit(token, username)
-		else:
-			authentication_failed.emit("No token in response")
+	print("Parsed response: ", response_data)
 
-	elif endpoint == "/api/auth/verify":
-		if response_data.has("valid"):
-			verification_complete.emit(response_data["valid"])
-		else:
-			verification_complete.emit(false)
+	# Determine which endpoint this was for based on the response structure
+	if response_data.has("token") and response_data.has("user"):
+		# Register or Login response
+		var token: String = response_data["token"]
+		var username: String = response_data["user"]["username"]
+		save_token(token, username)
+		authentication_complete.emit(token, username)
+	elif response_data.has("valid"):
+		# Verify token response
+		verification_complete.emit(response_data["valid"])
+	else:
+		print("Unexpected response structure")
+		authentication_failed.emit("Unexpected server response")
 
 ## Validate registration inputs
 func _validate_inputs(username: String, email: String, password: String) -> bool:
