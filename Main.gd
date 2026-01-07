@@ -29,6 +29,7 @@ const NETWORK_COMPRESSION_MODE := ENetConnection.CompressionMode.COMPRESS_FASTLZ
 # Set via UserPreferences or config file
 var backend := "enet"
 var node_server_url := "ws://localhost:30820"
+var play_mode := "classic" # "classic" (ENet) or "global" (Node)
 
 # thread for UPNP connection
 var thread : Thread = null
@@ -66,6 +67,17 @@ var display_version := "beta 13.2pre"
 @onready var join_address : LineEdit = $MultiplayerMenu/PlayMenu/JoinHbox/Address
 @onready var editor_button : Button = $MultiplayerMenu/MainMenu/Editor
 @onready var tutorial_button : Button = $MultiplayerMenu/MainMenu/Tutorial
+@onready var play_button : Button = $MultiplayerMenu/MainMenu/Play if has_node("MultiplayerMenu/MainMenu/Play") else null
+
+@onready var multiplayer_menu : CanvasLayer = $MultiplayerMenu
+@onready var main_menu : Control = $MultiplayerMenu/MainMenu if has_node("MultiplayerMenu/MainMenu") else null
+@onready var play_menu : Control = $MultiplayerMenu/PlayMenu
+var mode_selector_panel : Panel = null
+var global_menu_panel : Panel = null
+var global_server_url_field : LineEdit = null
+var global_room_code_field : LineEdit = null
+var global_host_button : Button = null
+var global_join_button : Button = null
 
 @onready var udp_server : InfoServer = $UDPServer
 
@@ -82,12 +94,28 @@ func _ready() -> void:
 	# be used at the same time)
 	get_tree().set_auto_accept_quit(false)
 
-	host_button.connect("pressed", _on_host_pressed)
-	host_public_button.connect("toggled", _on_host_public_toggled)
+	# Hook Play button to mode selector
+	if play_button:
+		if not play_button.is_connected("pressed", Callable(self, "_on_play_pressed")):
+			play_button.pressed.connect(_on_play_pressed)
+	else:
+		print_debug("Play button not found; mode selector won't show")
+	# Prepare panels but keep them hidden until Play is clicked
+	_build_mode_selector()
+	_build_global_menu()
+	_reset_menu_visibility()
+
+	if not host_button.is_connected("pressed", Callable(self, "_on_host_pressed")):
+		host_button.connect("pressed", _on_host_pressed)
+	if not host_public_button.is_connected("toggled", Callable(self, "_on_host_public_toggled")):
+		host_public_button.connect("toggled", _on_host_public_toggled)
 	host_public = host_public_button.button_pressed
-	join_button.connect("pressed", _on_join_pressed)
-	editor_button.connect("pressed", _on_editor_pressed)
-	tutorial_button.connect("pressed", _on_tutorial_pressed)
+	if not join_button.is_connected("pressed", Callable(self, "_on_join_pressed")):
+		join_button.connect("pressed", _on_join_pressed)
+	if not editor_button.is_connected("pressed", Callable(self, "_on_editor_pressed")):
+		editor_button.connect("pressed", _on_editor_pressed)
+	if not tutorial_button.is_connected("pressed", Callable(self, "_on_tutorial_pressed")):
+		tutorial_button.connect("pressed", _on_tutorial_pressed)
 
 	# Scan for LAN servers.
 	get_tree().current_scene.add_child(lan_listener)
@@ -181,6 +209,325 @@ func get_display_name_from_field() -> Variant:
 	UserPreferences.save_pref("display_name", t_display_name)
 	return t_display_name
 
+# --- Menu visibility and state management ---
+func _reset_menu_visibility() -> void:
+	"""Reset all menus to initial state (main menu visible, others hidden)"""
+	if main_menu:
+		main_menu.visible = true
+	if play_menu:
+		play_menu.visible = false
+	if mode_selector_panel:
+		mode_selector_panel.visible = false
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	# Reset button states to enabled and default text
+	if host_button:
+		host_button.disabled = false
+		host_button.text = JsonHandler.find_entry_in_file("ui/host") if JsonHandler.has_method("find_entry_in_file") else "Host"
+	if join_button:
+		join_button.disabled = false
+		join_button.text = JsonHandler.find_entry_in_file("ui/join") if JsonHandler.has_method("find_entry_in_file") else "Join"
+	if global_host_button:
+		global_host_button.disabled = false
+		global_host_button.text = "Host (Global)"
+	if global_join_button:
+		global_join_button.disabled = false
+		global_join_button.text = "Join (Global)"
+	if global_room_code_field:
+		global_room_code_field.text = ""
+
+func _on_play_pressed() -> void:
+	"""Show mode selector when Play button clicked"""
+	if main_menu:
+		main_menu.visible = false
+	if play_menu:
+		play_menu.visible = false
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	if mode_selector_panel:
+		mode_selector_panel.visible = true
+
+# --- Mode selector helpers ---
+func _build_mode_selector() -> void:
+	if multiplayer_menu == null:
+		return
+	mode_selector_panel = Panel.new()
+	mode_selector_panel.name = "ModeSelector"
+	mode_selector_panel.custom_minimum_size = Vector2(520, 220)
+	mode_selector_panel.anchor_left = 0.25
+	mode_selector_panel.anchor_right = 0.75
+	mode_selector_panel.anchor_top = 0.25
+	mode_selector_panel.anchor_bottom = 0.55
+	mode_selector_panel.offset_left = 0
+	mode_selector_panel.offset_top = 0
+	mode_selector_panel.offset_right = 0
+	mode_selector_panel.offset_bottom = 0
+	mode_selector_panel.visible = false
+
+	var vb := VBoxContainer.new()
+	vb.anchor_left = 0
+	vb.anchor_right = 1
+	vb.anchor_top = 0
+	vb.anchor_bottom = 1
+	vb.offset_left = 16
+	vb.offset_right = -16
+	vb.offset_top = 16
+	vb.offset_bottom = -16
+	vb.add_theme_constant_override("separation", 14)
+
+	var title := Label.new()
+	title.text = "Choose play mode"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+
+	var subtitle := Label.new()
+	subtitle.text = "Classic: LAN/Direct IP (ENet)\nGlobal: Node backend (rooms, matchmaking-ready)"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 16)
+
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 12)
+
+	var classic_btn := Button.new()
+	classic_btn.text = "Classic (ENet)"
+	classic_btn.custom_minimum_size = Vector2(200, 48)
+	classic_btn.pressed.connect(_on_choose_classic)
+
+	var global_btn := Button.new()
+	global_btn.text = "Global (Node)"
+	global_btn.custom_minimum_size = Vector2(200, 48)
+	global_btn.pressed.connect(_on_choose_global)
+
+	buttons.add_child(classic_btn)
+	buttons.add_child(global_btn)
+
+	vb.add_child(title)
+	vb.add_child(subtitle)
+	vb.add_child(buttons)
+	mode_selector_panel.add_child(vb)
+	multiplayer_menu.add_child(mode_selector_panel)
+
+func _build_global_menu() -> void:
+	if multiplayer_menu == null:
+		return
+	global_menu_panel = Panel.new()
+	global_menu_panel.name = "GlobalMenu"
+	global_menu_panel.custom_minimum_size = Vector2(560, 320)
+	global_menu_panel.anchor_left = 0.22
+	global_menu_panel.anchor_right = 0.78
+	global_menu_panel.anchor_top = 0.18
+	global_menu_panel.anchor_bottom = 0.62
+	global_menu_panel.offset_left = 0
+	global_menu_panel.offset_top = 0
+	global_menu_panel.offset_right = 0
+	global_menu_panel.offset_bottom = 0
+	global_menu_panel.visible = false
+
+	var vb := VBoxContainer.new()
+	vb.anchor_left = 0
+	vb.anchor_right = 1
+	vb.anchor_top = 0
+	vb.anchor_bottom = 1
+	vb.offset_left = 16
+	vb.offset_right = -16
+	vb.offset_top = 16
+	vb.offset_bottom = -16
+	vb.add_theme_constant_override("separation", 14)
+
+	var title := Label.new()
+	title.text = "Global Servers"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+
+	var blurb := Label.new()
+	blurb.text = "Connect via Node backend. Host to create a room, or join with a room code."
+	blurb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	blurb.add_theme_font_size_override("font_size", 16)
+	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD
+
+	var url_hb := HBoxContainer.new()
+	url_hb.add_theme_constant_override("separation", 8)
+	var url_label := Label.new()
+	url_label.text = "Server URL"
+	url_label.custom_minimum_size = Vector2(110, 32)
+	global_server_url_field = LineEdit.new()
+	global_server_url_field.text = node_server_url
+	url_hb.add_child(url_label)
+	url_hb.add_child(global_server_url_field)
+
+	var code_hb := HBoxContainer.new()
+	code_hb.add_theme_constant_override("separation", 8)
+	var code_label := Label.new()
+	code_label.text = "Room Code"
+	code_label.custom_minimum_size = Vector2(110, 32)
+	global_room_code_field = LineEdit.new()
+	global_room_code_field.placeholder_text = "e.g. ABC123"
+	code_hb.add_child(code_label)
+	code_hb.add_child(global_room_code_field)
+
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 12)
+
+	global_host_button = Button.new()
+	global_host_button.text = "Host (Global)"
+	global_host_button.custom_minimum_size = Vector2(200, 48)
+	global_host_button.pressed.connect(_on_global_host_pressed)
+
+	global_join_button = Button.new()
+	global_join_button.text = "Join (Global)"
+	global_join_button.custom_minimum_size = Vector2(200, 48)
+	global_join_button.pressed.connect(_on_global_join_pressed)
+
+	var back_btn := Button.new()
+	back_btn.text = "Back"
+	back_btn.custom_minimum_size = Vector2(140, 44)
+	back_btn.pressed.connect(_on_global_back)
+
+	buttons.add_child(global_host_button)
+	buttons.add_child(global_join_button)
+	buttons.add_child(back_btn)
+
+	vb.add_child(title)
+	vb.add_child(blurb)
+	vb.add_child(url_hb)
+	vb.add_child(code_hb)
+	vb.add_child(buttons)
+	global_menu_panel.add_child(vb)
+	multiplayer_menu.add_child(global_menu_panel)
+
+func _on_choose_classic() -> void:
+	play_mode = "classic"
+	backend = "enet"
+	_show_play_menu()
+
+func _on_choose_global() -> void:
+	play_mode = "global"
+	backend = "node"
+	_show_global_menu()
+
+func _show_play_menu() -> void:
+	"""Show classic ENet PlayMenu with Host/Join buttons"""
+	if mode_selector_panel:
+		mode_selector_panel.visible = false
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	if main_menu:
+		main_menu.visible = false
+	if play_menu:
+		play_menu.visible = true
+	# reset host/join buttons to defaults and re-enable
+	if host_button:
+		host_button.disabled = false
+		host_button.text = JsonHandler.find_entry_in_file("ui/host") if JsonHandler.has_method("find_entry_in_file") else "Host"
+	if join_button:
+		join_button.disabled = false
+		join_button.text = JsonHandler.find_entry_in_file("ui/join") if JsonHandler.has_method("find_entry_in_file") else "Join"
+
+func _show_global_menu() -> void:
+	"""Show Global (Node backend) menu with dedicated Host/Join controls"""
+	if mode_selector_panel:
+		mode_selector_panel.visible = false
+	if play_menu:
+		play_menu.visible = false
+	if main_menu:
+		main_menu.visible = false
+	if global_server_url_field:
+		global_server_url_field.text = node_server_url
+	if global_room_code_field:
+		global_room_code_field.text = ""
+	# Reset button states
+	if global_host_button:
+		global_host_button.disabled = false
+		global_host_button.text = "Host (Global)"
+	if global_join_button:
+		global_join_button.disabled = false
+		global_join_button.text = "Join (Global)"
+	if global_menu_panel:
+		global_menu_panel.visible = true
+
+func _on_global_back() -> void:
+	"""Return to mode selector from global menu"""
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	# Reset input fields and button states
+	if global_room_code_field:
+		global_room_code_field.text = ""
+	if global_host_button:
+		global_host_button.disabled = false
+		global_host_button.text = "Host (Global)"
+	if global_join_button:
+		global_join_button.disabled = false
+		global_join_button.text = "Join (Global)"
+	if mode_selector_panel:
+		mode_selector_panel.visible = true
+
+func _on_choose_global_connect() -> void:
+	# Proceed to node flow using existing host/join UI (but with global backend)
+	play_mode = "global"
+	backend = "node"
+	_show_play_menu()
+
+func _on_global_host_pressed() -> void:
+	play_mode = "global"
+	backend = "node"
+	if global_server_url_field:
+		node_server_url = global_server_url_field.text
+	var name: String = str(get_display_name_from_field())
+	if name == "" or name == "null":
+		return
+	Global.display_name = name
+	if global_host_button:
+		global_host_button.text = "Starting server..."
+		global_host_button.disabled = true
+	# keep classic host button in sync for shared Node flow
+	host_button.text = "Starting server..."
+	host_button.disabled = true
+	if main_menu:
+		main_menu.visible = false
+	if play_menu:
+		play_menu.visible = false
+	if mode_selector_panel:
+		mode_selector_panel.visible = false
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	_setup_node_backend_host()
+
+func _on_global_join_pressed() -> void:
+	play_mode = "global"
+	backend = "node"
+	if global_server_url_field:
+		node_server_url = global_server_url_field.text
+	var room_code := ""
+	if global_room_code_field:
+		room_code = global_room_code_field.text
+	if room_code == "":
+		UIHandler.show_alert("Enter a room code.", 5, false, UIHandler.alert_colour_error)
+		return
+	# editor debug names
+	if OS.has_feature("editor"):
+		Global.display_name = str("Editor Client ", randi_range(0, 99))
+	else:
+		var name: String = str(get_display_name_from_field())
+		if name == "" or name == "null":
+			return
+		Global.display_name = name
+	if global_join_button:
+		global_join_button.text = "Connecting..."
+		global_join_button.disabled = true
+	# keep classic join button in sync for shared Node flow
+	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
+	if main_menu:
+		main_menu.visible = false
+	if play_menu:
+		play_menu.visible = false
+	if mode_selector_panel:
+		mode_selector_panel.visible = false
+	if global_menu_panel:
+		global_menu_panel.visible = false
+	_setup_node_backend_client(room_code)
+
 # UPnP setup thread
 func _upnp_setup(server_port : int) -> void:
 	upnp = UPNP.new()
@@ -238,6 +585,11 @@ func _on_host_pressed() -> void:
 	# Change button text to notify user server is starting.
 	host_button.text = "Starting server..."
 	host_button.disabled = true
+
+	# Global (Node) path
+	if play_mode == "global":
+		_setup_node_backend_host()
+		return
 	# only port forward public servers
 	if host_public:
 		thread = Thread.new()
@@ -328,6 +680,14 @@ func _on_join_pressed(address : Variant = null, is_from_list := false) -> void:
 
 	# Change button text to notify user we are joining.
 	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
+
+	# Global (Node) path
+	if play_mode == "global":
+		var room_code := str(address)
+		if room_code == "":
+			room_code = join_address.text
+		_setup_node_backend_client(room_code)
+		return
 
 	# Create the client.
 	enet_peer.create_client(str(address), PORT)
@@ -531,6 +891,9 @@ func remove_player(peer_id : int) -> void:
 func _setup_node_backend_host() -> void:
 	host_button.text = "Starting server..."
 	host_button.disabled = true
+	if global_host_button:
+		global_host_button.text = "Starting server..."
+		global_host_button.disabled = true
 
 	# Create Node adapter
 	node_peer = MultiplayerNodeAdapter.new()
@@ -544,6 +907,9 @@ func _setup_node_backend_host() -> void:
 	if not node_peer.connect_to_server(node_server_url):
 		host_button.text = "Host server"
 		host_button.disabled = false
+		if global_host_button:
+			global_host_button.text = "Host (Global)"
+			global_host_button.disabled = false
 		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
 		return
 
@@ -571,6 +937,9 @@ func _setup_node_backend_host() -> void:
 
 func _setup_node_backend_client(room_code: String = "") -> void:
 	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
+	if global_join_button:
+		global_join_button.text = "Connecting..."
+		global_join_button.disabled = true
 
 	# Create Node adapter
 	node_peer = MultiplayerNodeAdapter.new()
@@ -583,6 +952,9 @@ func _setup_node_backend_client(room_code: String = "") -> void:
 	# Connect to Node backend
 	if not node_peer.connect_to_server(node_server_url):
 		join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
+		if global_join_button:
+			global_join_button.text = "Join (Global)"
+			global_join_button.disabled = false
 		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
 		return
 
@@ -622,3 +994,12 @@ func _on_connection_failed(reason: String) -> void:
 	UIHandler.show_alert("Connection failed: " + reason, 8, false, UIHandler.alert_colour_error)
 	host_button.disabled = false
 	host_button.text = "Host server"
+	if join_button:
+		join_button.text = JsonHandler.find_entry_in_file("ui/join") if JsonHandler.has_method("find_entry_in_file") else "Join"
+		join_button.disabled = false
+	if global_host_button:
+		global_host_button.text = "Host (Global)"
+		global_host_button.disabled = false
+	if global_join_button:
+		global_join_button.text = "Join (Global)"
+		global_join_button.disabled = false
