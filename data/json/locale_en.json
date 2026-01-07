@@ -2,7 +2,8 @@
   "ui": {
     "close": "Close",
     "cancel": "Cancel",
-    "quit": "Quit to desktop",
+    "quit": "Quit To Desktop",
+    "sign_out_quit": "Sign Out & Quit",
     "play": "Play",
     "back": "Back",
     "upload_image": "Upload image...",

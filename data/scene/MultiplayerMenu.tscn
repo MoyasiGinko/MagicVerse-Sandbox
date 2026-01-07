@@ -249,6 +249,49 @@ text = "Quit"
 script = ExtResource("2_o48rt")
 json_text = "ui/quit"
 
+[node name="QuitDialog" type="PanelContainer" parent="."]
+visible = false
+custom_minimum_size = Vector2(420, 2.08165e-12)
+offset_left = 329.0
+offset_top = 353.0
+offset_right = 749.0
+offset_bottom = 613.0
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="VBoxContainer" parent="QuitDialog"]
+layout_mode = 2
+
+[node name="Signout & Quit" type="Button" parent="QuitDialog/MarginContainer"]
+self_modulate = Color(1, 0, 0, 1)
+custom_minimum_size = Vector2(2.08165e-12, 60)
+layout_mode = 2
+text = "Sign Out & Quit"
+script = ExtResource("2_o48rt")
+json_text = "ui/sign_out_quit"
+
+[node name="Spacer4" type="Control" parent="QuitDialog/MarginContainer"]
+custom_minimum_size = Vector2(2.08165e-12, 16)
+layout_mode = 2
+
+[node name="Quit" type="Button" parent="QuitDialog/MarginContainer"]
+self_modulate = Color(1, 0, 0, 1)
+custom_minimum_size = Vector2(2.08165e-12, 60)
+layout_mode = 2
+text = "Quit To Desktop"
+script = ExtResource("2_o48rt")
+json_text = "ui/quit"
+
+[node name="Spacer3" type="Control" parent="QuitDialog/MarginContainer"]
+custom_minimum_size = Vector2(2.08165e-12, 16)
+layout_mode = 2
+
+[node name="Cancel" type="Button" parent="QuitDialog/MarginContainer"]
+custom_minimum_size = Vector2(2.08165e-12, 60)
+layout_mode = 2
+text = "Cancel"
+script = ExtResource("2_o48rt")
+json_text = "ui/cancel"
+
 [node name="GameModeMenu" type="VBoxContainer" parent="."]
 visible = false
 custom_minimum_size = Vector2(308, 0)

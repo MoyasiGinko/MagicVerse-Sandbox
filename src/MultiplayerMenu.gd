@@ -19,6 +19,9 @@ class_name MultiplayerMenu
 
 @onready var preview_player : RigidPlayer = Global.get_world().get_current_map().get_node("RigidPlayer")
 @onready var nametag : LineEdit = $DisplayName
+@onready var quit_dialog : PanelContainer = $QuitDialog
+@onready var shirt_colour_picker : Control = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/ColorPickerButton
+@onready var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
 var auth_manager: AuthenticationManager
 var _last_display_name: String = ""
 
@@ -41,13 +44,15 @@ func _ready() -> void:
 	$MainMenu/Credits.connect("pressed", show_hide.bind("CreditsMenu", "MainMenu"))
 	$CreditsMenu/Back.connect("pressed", show_hide.bind("MainMenu", "CreditsMenu"))
 	$SettingsScroll/SettingsMenu/SaveButton.connect("pressed", show_hide.bind("MainMenu", "SettingsScroll"))
-	$MainMenu/Quit.connect("pressed", quit)
+	$MainMenu/Quit.connect("pressed", _on_quit_pressed)
 
-	# Appearance settings
-	var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
-	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
-	var shirt_colour_picker : Control = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/ColorPickerButton
+	# Connect QuitDialog buttons
+	$"QuitDialog/MarginContainer/Signout & Quit".connect("pressed", _on_quit_sign_out)
+	$"QuitDialog/MarginContainer/Quit".connect("pressed", _on_quit_confirmed)
+	$"QuitDialog/MarginContainer/Cancel".connect("pressed", _on_quit_cancelled)
+
 	shirt_colour_picker.connect("color_changed", Global.set_shirt_colour)
+	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
 	var pants_colour_picker : Control = $AppearanceMenu/PantsPanel/PantsPanelContainer/ColorPickerButton
 	pants_colour_picker.connect("color_changed", Global.set_pants_colour)
 	var skin_colour_picker : Control = $AppearanceMenu/SkinPanel/SkinPanelContainer/ColorPickerButton
@@ -97,8 +102,34 @@ func show_hide(a : String, b : String) -> void:
 	get_node(a).visible = true
 	get_node(b).visible = false
 
-func quit() -> void:
+func _on_quit_pressed() -> void:
+	"""Show quit dialog"""
+	quit_dialog.visible = true
+
+func _on_quit_confirmed() -> void:
+	"""Quit to desktop without signing out"""
 	get_tree().quit()
+
+func _on_quit_cancelled() -> void:
+	"""Cancel - just close the dialog"""
+	quit_dialog.visible = false
+
+func _on_quit_sign_out() -> void:
+	"""Sign out and quit to desktop"""
+	# Clear authentication
+	if auth_manager:
+		auth_manager.clear_saved_token()
+	Global.auth_token = ""
+	Global.player_username = ""
+	Global.player_display_name = ""
+	Global.display_name = ""
+	Global.is_authenticated = false
+
+	# Quit the game
+	get_tree().quit()
+
+func quit() -> void:
+	_on_quit_pressed()
 
 func _process(delta : float) -> void:
 	if visible:
