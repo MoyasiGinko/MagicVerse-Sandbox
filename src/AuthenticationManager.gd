@@ -125,7 +125,8 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		authentication_failed.emit("Network error")
 		return
 
-	if response_code != 200:
+	# Accept 2xx status codes (200-299) as success
+	if response_code < 200 or response_code >= 300:
 		print("Server returned error code: ", response_code)
 		var error_text: String = body.get_string_from_utf8()
 		print("Error response: ", error_text)

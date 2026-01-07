@@ -44,12 +44,16 @@ export class UserRepository {
 
   getUserByUsername(username: string): User | null {
     const stmt = this.db.prepare("SELECT * FROM users WHERE username = ?");
-    return stmt.get(username) as User | null;
+    const result = stmt.get(username) as User | null;
+    console.log(`[DB] getUserByUsername('${username}'):`, result);
+    return result;
   }
 
   getUserByEmail(email: string): User | null {
     const stmt = this.db.prepare("SELECT * FROM users WHERE email = ?");
-    return stmt.get(email) as User | null;
+    const result = stmt.get(email) as User | null;
+    console.log(`[DB] getUserByEmail('${email}'):`, result);
+    return result;
   }
 
   updateLastLogin(userId: number): void {
@@ -62,10 +66,38 @@ export class UserRepository {
   }
 
   isUsernameTaken(username: string): boolean {
-    return this.getUserByUsername(username) !== null;
+    const user = this.getUserByUsername(username);
+    const taken = user != null;
+    console.log(
+      `[CHECK] isUsernameTaken('${username}'): ${taken} (user:`,
+      user,
+      `)`
+    );
+    return taken;
   }
 
   isEmailTaken(email: string): boolean {
-    return this.getUserByEmail(email) !== null;
+    const user = this.getUserByEmail(email);
+    const taken = user != null;
+    console.log(`[CHECK] isEmailTaken('${email}'): ${taken} (user:`, user, `)`);
+    return taken;
+  }
+
+  getAllUsers(): User[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM users WHERE is_active = 1 ORDER BY username ASC"
+    );
+    return stmt.all() as User[];
+  }
+
+  getOnlineUsers(minutesSinceActive: number = 5): User[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM users
+      WHERE is_active = 1
+      AND last_login IS NOT NULL
+      AND datetime(last_login) > datetime('now', '-' || ? || ' minutes')
+      ORDER BY username ASC
+    `);
+    return stmt.all(minutesSinceActive) as User[];
   }
 }

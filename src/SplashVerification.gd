@@ -7,7 +7,7 @@ var status_label: Label
 var loading_label: Label
 
 # Configuration
-const MINIMUM_SPLASH_TIME: float = 15.0  # Minimum time to show splash
+const MINIMUM_SPLASH_TIME: float = 10.0  # Minimum time to show splash
 const BANNER_IMAGE_PATH: String = "res://title.png"  # Path to your banner image
 const VERIFICATION_TIMEOUT: float = 10.0  # Maximum time to wait for verification
 
@@ -15,12 +15,13 @@ var auth_manager: AuthenticationManager = null
 var splash_timer: float = 0.0
 var verification_complete: bool = false
 var verification_successful: bool = false
+var transition_started: bool = false
 
 func _ready() -> void:
 	# Get node references
 	banner_image = $BannerImage
-	progress_bar = $VerificationOverlay/ProgressBar
-	status_label = $VerificationOverlay/StatusLabel
+	progress_bar = $VerificationOverlay/VBoxContainer/ProgressBar
+	status_label = $VerificationOverlay/VBoxContainer/StatusLabel
 	loading_label = $VerificationOverlay/VBoxContainer/LoadingSpinner
 
 	# Load banner image
@@ -44,35 +45,45 @@ func _process(delta: float) -> void:
 	splash_timer += delta
 
 	# Update progress bar based on splash timer
-	var progress = min(splash_timer / MINIMUM_SPLASH_TIME, 1.0)
+	var progress: float = min(splash_timer / MINIMUM_SPLASH_TIME, 1.0)
 	progress_bar.value = progress * 100
 
-	# Check if we can proceed
-	if splash_timer >= MINIMUM_SPLASH_TIME and verification_complete:
+	# Check if we can proceed (only once)
+	if not transition_started and splash_timer >= MINIMUM_SPLASH_TIME and verification_complete:
+		print("Timer complete. Starting transition...")
+		print("Verification successful: ", verification_successful)
+		transition_started = true
 		if verification_successful:
 			# Token is valid, proceed to main game
+			print("Proceeding to game...")
 			_proceed_to_game()
 		else:
 			# Token invalid, go back to authentication
+			print("Going back to authentication...")
 			_go_back_to_authentication()
 
 func _start_verification() -> void:
+	print("Starting verification...")
 	# Load saved token
-	var saved_token = auth_manager.load_saved_token()
+	var saved_token: String = auth_manager.load_saved_token()
+	print("Saved token exists: ", saved_token != "")
 
 	if saved_token:
 		status_label.text = "Verifying session..."
 		loading_label.text = "⏳ Verifying token..."
 		# Verify the saved token
-		auth_manager.verify_token(saved_token)
+		print("Calling verify_token...")
+		auth_manager.verify_token(saved_token as String)
 
 		# Set timeout for verification
 		await get_tree().create_timer(VERIFICATION_TIMEOUT).timeout
 		if not verification_complete:
+			print("Verification timed out!")
 			status_label.text = "Verification timeout"
 			verification_complete = true
 			verification_successful = false
 	else:
+		print("No saved token found")
 		# No saved token, go back to authentication
 		status_label.text = "Please login or register"
 		loading_label.text = "No saved session found"
@@ -81,6 +92,7 @@ func _start_verification() -> void:
 		verification_successful = false
 
 func _on_verification_complete(is_valid: bool) -> void:
+	print("Verification callback received - Valid: ", is_valid)
 	verification_complete = true
 	verification_successful = is_valid
 
@@ -92,15 +104,21 @@ func _on_verification_complete(is_valid: bool) -> void:
 		loading_label.text = "✗ Session invalid"
 
 func _proceed_to_game() -> void:
+	print("_proceed_to_game called")
 	status_label.text = "Entering game..."
 	loading_label.text = "✓ Session valid - Entering game"
 	progress_bar.value = 100
 
 	# Fade out and proceed to main menu
 	await _fade_out()
-	get_tree().change_scene_to_file("res://Main.tscn")
 
+	print("Attempting to change scene to MainScene.tscn")
+	var error: int = get_tree().change_scene_to_file("res://data/scene/MainScene.tscn")
+	if error != OK:
+		print("ERROR: Failed to change scene. Error code: ", error)
+		push_error("Failed to load MainScene.tscn")
 func _go_back_to_authentication() -> void:
+	print("_go_back_to_authentication called")
 	status_label.text = "Please login again"
 	loading_label.text = "Session invalid - returning to login"
 
@@ -109,11 +127,18 @@ func _go_back_to_authentication() -> void:
 
 	# Fade out and return to authentication
 	await _fade_out()
-	get_tree().change_scene_to_file("res://data/scene/AuthenticationScreen.tscn")
+
+	print("Attempting to change scene to AuthenticationScreen.tscn")
+	var error: int = get_tree().change_scene_to_file("res://data/scene/AuthenticationScreen.tscn")
+	if error != OK:
+		print("ERROR: Failed to change scene. Error code: ", error)
+		push_error("Failed to load AuthenticationScreen.tscn")
+	else:
+		print("Scene change initiated successfully")
 
 func _fade_out() -> void:
-	var overlay = $VerificationOverlay
-	var tween = create_tween()
+	var overlay: CanvasItem = $VerificationOverlay
+	var tween: Tween = create_tween()
 	tween.tween_property(overlay, "color", Color(0, 0, 0, 1), 0.5)
 	await tween.finished
 

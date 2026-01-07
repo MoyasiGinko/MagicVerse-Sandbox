@@ -26,12 +26,22 @@ router.post(
 
     try {
       // Check if username or email already exists
-      if (userRepo.isUsernameTaken(username)) {
+      console.log(
+        `Registration attempt for username: ${username}, email: ${email}`
+      );
+
+      const usernameTaken = userRepo.isUsernameTaken(username);
+      const emailTaken = userRepo.isEmailTaken(email);
+
+      console.log(`Username '${username}' taken: ${usernameTaken}`);
+      console.log(`Email '${email}' taken: ${emailTaken}`);
+
+      if (usernameTaken) {
         res.status(409).json({ error: "Username already taken" });
         return;
       }
 
-      if (userRepo.isEmailTaken(email)) {
+      if (emailTaken) {
         res.status(409).json({ error: "Email already registered" });
         return;
       }

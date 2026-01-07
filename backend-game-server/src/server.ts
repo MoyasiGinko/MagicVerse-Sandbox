@@ -7,6 +7,7 @@ import { RoomRepository } from "./database/repositories/roomRepository";
 import authRoutes from "./api/authRoutes";
 import roomRoutes from "./api/roomRoutes";
 import statsRoutes from "./api/statsRoutes";
+import userRoutes from "./api/userRoutes";
 
 const app = express();
 const server = http.createServer(app);
@@ -22,6 +23,7 @@ runMigrations();
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api", statsRoutes);
 
 // Health check
@@ -49,6 +51,8 @@ server.listen(config.port, () => {
   console.log(`  - GET  /api/auth/verify`);
   console.log(`  - GET  /api/rooms (Server List)`);
   console.log(`  - GET  /api/rooms/:id`);
+  console.log(`  - GET  /api/users (All Users)`);
+  console.log(`  - GET  /api/users/online (Online Users)`);
   console.log(`  - GET  /api/users/:id/stats`);
   console.log(`  - GET  /api/leaderboard`);
 });
