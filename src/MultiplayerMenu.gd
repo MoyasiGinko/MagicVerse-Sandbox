@@ -26,16 +26,18 @@ func _ready() -> void:
 	# play hair swing animation on new hair selected
 	#$AppearanceMenu/HairPanel/HairPanelContainer/Picker.connect("item_selected", play_preview_character_appearance_animation)
 	$AppearanceMenu/Back.connect("pressed", hide_appearance_settings)
-	$MainMenu/Play.connect("pressed", show_hide.bind("PlayMenu", "MainMenu"))
-	$PlayMenu/Back.connect("pressed", show_hide.bind("MainMenu", "PlayMenu"))
-	$PlayMenu/HostHbox/Edit.connect("pressed", show_hide.bind("HostSettingsMenu", "PlayMenu"))
-	$HostSettingsMenu/Back.connect("pressed", show_hide.bind("PlayMenu", "HostSettingsMenu"))
+	$MainMenu/Play.connect("pressed", show_hide.bind("GameModeMenu", "MainMenu"))
+	$GameModeMenu/Back.connect("pressed", show_hide.bind("MainMenu", "GameModeMenu"))
+	$ClassicPlayMenu/Back.connect("pressed", show_hide.bind("GameModeMenu", "ClassicPlayMenu"))
+	$GlobalPlayMenu/Back.connect("pressed", show_hide.bind("GameModeMenu", "GlobalPlayMenu"))
+	$ClassicPlayMenu/HostHbox/Edit.connect("pressed", show_hide.bind("HostSettingsMenu", "ClassicPlayMenu"))
+	$HostSettingsMenu/Back.connect("pressed", show_hide.bind("ClassicPlayMenu", "HostSettingsMenu"))
 	$MainMenu/Settings.connect("pressed", show_hide.bind("SettingsScroll", "MainMenu"))
 	$MainMenu/Credits.connect("pressed", show_hide.bind("CreditsMenu", "MainMenu"))
 	$CreditsMenu/Back.connect("pressed", show_hide.bind("MainMenu", "CreditsMenu"))
 	$SettingsScroll/SettingsMenu/SaveButton.connect("pressed", show_hide.bind("MainMenu", "SettingsScroll"))
 	$MainMenu/Quit.connect("pressed", quit)
-	
+
 	# Appearance settings
 	var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
 	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
@@ -53,7 +55,7 @@ func _ready() -> void:
 	shirt_tex_picker.connect("pressed", Global.upload_shirt_texture)
 	var shirt_reset : Button = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/TextureResetContainer/ResetButton
 	shirt_reset.connect("pressed", Global.reset_shirt_texture)
-	
+
 	# Set to loaded settings
 	hair_colour_picker.color = Global.hair_colour
 	shirt_colour_picker.color = Global.shirt_colour

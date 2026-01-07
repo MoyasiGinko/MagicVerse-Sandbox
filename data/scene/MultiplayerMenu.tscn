@@ -144,7 +144,6 @@ text = "Display Name"
 script = ExtResource("3_yuqno")
 
 [node name="MainMenu" type="VBoxContainer" parent="."]
-visible = false
 custom_minimum_size = Vector2(308, 0)
 anchors_preset = 6
 anchor_left = 1.0
@@ -452,6 +451,7 @@ text = "Searching for LAN servers..."
 script = ExtResource("3_yuqno")
 
 [node name="GlobalPlayMenu" type="VBoxContainer" parent="."]
+visible = false
 custom_minimum_size = Vector2(308, 2.08165e-12)
 anchors_preset = -1
 anchor_left = 1.0
