@@ -83,9 +83,15 @@ func _ready() -> void:
 
 # called whenever the main menu is opened
 func update_spawnable_scenes() -> void:
+	# Only update if we're in the game scene (Main)
+	if not get_tree().current_scene or not get_tree().current_scene.has_node("World"):
+		return
+
 	var obj_spawner : MultiplayerSpawner = Global.get_world().get_node_or_null("MultiplayerObjSpawner")
 	while obj_spawner == null:
 		await get_tree().process_frame
+		if not get_tree().current_scene or not get_tree().current_scene.has_node("World"):
+			return
 		obj_spawner = Global.get_world().get_node_or_null("MultiplayerObjSpawner")
 	for obj : Variant in objects:
 		obj_spawner.add_spawnable_scene(objects[obj].resource_path as String)

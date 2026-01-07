@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://nxw5ynr04nwt"]
+
+[ext_resource type="Script" path="res://src/AuthenticationEntry.gd" id="1_rtp3x"]
+
+[node name="AuthenticationEntry" type="Node"]
+script = ExtResource("1_rtp3x")

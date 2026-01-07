@@ -1,0 +1,162 @@
+[gd_scene load_steps=2 format=3 uid="uid://dtbw3c48rrqvt"]
+
+[ext_resource type="Script" path="res://src/AuthenticationScreen.gd" id="1_l05h5"]
+
+[node name="AuthenticationScreen" type="CanvasLayer"]
+layer = 100
+script = ExtResource("1_l05h5")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+anchors_fill_parent = true
+color = Color(0.1, 0.1, 0.1, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+anchors_fill_parent = true
+alignment = 1
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Tinybox - Global Mode"
+theme_override_font_sizes/font_size = 32
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="Register" type="MarginContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="RegisterForm" type="VBoxContainer" parent="VBoxContainer/TabContainer/Register"]
+layout_mode = 2
+separation = 10
+
+[node name="UsernameLabel" type="Label" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+text = "Username"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="UsernameInput" type="LineEdit" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "3-20 characters"
+custom_minimum_size = Vector2(0, 40)
+
+[node name="EmailLabel" type="Label" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+text = "Email"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="EmailInput" type="LineEdit" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "your@email.com"
+custom_minimum_size = Vector2(0, 40)
+
+[node name="PasswordLabel" type="Label" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+text = "Password"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="PasswordInput" type="LineEdit" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Minimum 8 characters"
+secret = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="ConfirmPasswordLabel" type="Label" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+text = "Confirm Password"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="ConfirmPasswordInput" type="LineEdit" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Confirm password"
+secret = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+custom_minimum_size = Vector2(0, 30)
+theme_override_colors/font_color = Color(1, 0.8, 0.8, 1)
+
+[node name="RegisterButton" type="Button" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+text = "Register"
+custom_minimum_size = Vector2(0, 40)
+
+[node name="Spacer" type="Control" parent="VBoxContainer/TabContainer/Register/RegisterForm"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Login" type="MarginContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="LoginForm" type="VBoxContainer" parent="VBoxContainer/TabContainer/Login"]
+layout_mode = 2
+separation = 10
+
+[node name="UsernameLabel" type="Label" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+layout_mode = 2
+text = "Username or Email"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="UsernameInput" type="LineEdit" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Enter username or email"
+custom_minimum_size = Vector2(0, 40)
+
+[node name="PasswordLabel" type="Label" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+layout_mode = 2
+text = "Password"
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="PasswordInput" type="LineEdit" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Enter password"
+secret = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="RememberCheckbox" type="CheckBox" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+layout_mode = 2
+text = "Remember me"
+button_pressed = true
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+custom_minimum_size = Vector2(0, 30)
+theme_override_colors/font_color = Color(1, 0.8, 0.8, 1)
+
+[node name="LoginButton" type="Button" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+layout_mode = 2
+text = "Login"
+custom_minimum_size = Vector2(0, 40)
+
+[node name="Spacer" type="Control" parent="VBoxContainer/TabContainer/Login/LoginForm"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[connection signal="pressed" from="VBoxContainer/TabContainer/Register/RegisterForm/RegisterButton" to="." method="_on_register_pressed"]
+[connection signal="pressed" from="VBoxContainer/TabContainer/Login/LoginForm/LoginButton" to="." method="_on_login_pressed"]

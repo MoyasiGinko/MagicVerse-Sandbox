@@ -23,6 +23,12 @@ signal debug_toggled(mode : bool)
 
 var display_name : String = ""
 var connected_to_server := false
+
+# Authentication properties
+var auth_token: String = ""  # JWT token for authenticated requests
+var player_username: String = ""  # Username of logged-in player
+var is_authenticated: bool = false  # Whether user has logged in
+
 # server settings
 var server_banned_ips : Array = []
 var server_can_clients_load_worlds : bool = true
@@ -164,7 +170,8 @@ func _ready() -> void:
 	load_appearance()
 	get_viewport().connect("gui_focus_changed", _on_gui_focus_changed)
 	# save version once on launch, in case we want to compare against it in a newer version
-	UserPreferences.save_pref("version", get_tree().current_scene.server_version)
+	if get_tree().current_scene.has_meta("server_version") or get_tree().current_scene is Main:
+		UserPreferences.save_pref("version", get_tree().current_scene.server_version)
 	# fullscreen if not in debug mode
 	if !OS.has_feature("editor") && !OS.get_name() == "macOS" && !Global.server_mode():
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
@@ -191,7 +198,7 @@ func load_appearance() -> void:
 	var loaded_hair : Variant = UserPreferences.load_pref("hair")
 	if loaded_hair != null:
 		set_hair(loaded_hair as int)
-	
+
 	var loaded_shirt_colour : Variant = UserPreferences.load_pref("shirt_colour")
 	if loaded_shirt_colour != null:
 		set_shirt_colour(loaded_shirt_colour as Color)
@@ -368,7 +375,7 @@ func property_string_to_property(property_name : String, property : String) -> V
 			var parse_attempt : Variant = JSON.parse_string(property)
 			if parse_attempt != null:
 				return parse_attempt
-			else: 
+			else:
 				print("JSON parse for unknown property ", property_name, " failed, returning property as int.")
 				return int(property)
 
@@ -428,11 +435,11 @@ func server_start_gamemode(idx : int, params : Array, mods : Array) -> void:
 		if gm.running:
 			UIHandler.show_alert.rpc_id(multiplayer.get_remote_sender_id(), "Can't start a new gamemode while one is currently running!", 6, false, UIHandler.alert_colour_error)
 			return
-		
+
 	if get_world().gamemode_list.size() > 0:
 		get_world().gamemode_list[idx].connect("gamemode_ended", _on_gamemode_ended.bind(idx))
 		get_world().gamemode_list[idx].start(params, mods)
-		
+
 		last_gamemode_idx = idx
 		last_gamemode_params = params
 		last_gamemode_mods = mods
@@ -450,7 +457,7 @@ func format_server_version(what : String) -> String:
 	var first : String = what.substr(0, 2)
 	var second : String = what.substr(2, 2)
 	var last : String = what.right(1)
-	
+
 	var suffix : String = ""
 	if last == "0":
 		suffix = "pre"
