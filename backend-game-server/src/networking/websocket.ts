@@ -2,6 +2,9 @@ import { WebSocketServer, WebSocket, RawData } from "ws";
 import http from "http";
 import { logInfo, logError } from "../utils/logger";
 import { RoomManager, GameRoom } from "../game/roomManager";
+import { verifyToken } from "../auth/jwt";
+import { RoomRepository } from "../database/repositories/roomRepository";
+import { UserRepository } from "../database/repositories/userRepository";
 
 type Message = { type: string; data?: unknown };
 
@@ -12,10 +15,14 @@ type ClientSession = {
   name: string;
   version: string;
   ip: string;
+  userId: number | null; // Added for authenticated users
+  isAuthenticated: boolean; // Track if user is authenticated
 };
 
 const roomManager = new RoomManager();
 const clientSessions = new Map<WebSocket, ClientSession>();
+const roomRepo = new RoomRepository();
+const userRepo = new UserRepository();
 
 function getClientIp(ws: WebSocket): string {
   const remoteAddr =
@@ -71,6 +78,16 @@ function cleanupClient(ws: WebSocket) {
     const room = roomManager.getRoom(roomId);
     if (room) {
       roomManager.leaveRoom(roomId, peerId);
+
+      // Update database player count
+      const remainingMembers = roomManager.getRoomMembers(roomId);
+      if (remainingMembers.length > 0) {
+        roomRepo.updatePlayerCount(roomId, remainingMembers.length);
+      } else {
+        // Room is empty, mark as inactive in database
+        roomRepo.setRoomActive(roomId, false);
+      }
+
       broadcast(room, "peer_left", { peerId }, peerId);
       logInfo(`peer left: roomId=${roomId} peerId=${peerId}`);
     }
@@ -89,6 +106,8 @@ export function setupWebSocket(server: http.Server) {
       name: "",
       version: "",
       ip,
+      userId: null,
+      isAuthenticated: false,
     };
     clientSessions.set(ws, session);
     logInfo(`ws: client connected from ${ip}`);
@@ -100,29 +119,99 @@ export function setupWebSocket(server: http.Server) {
       }
 
       switch (msg.type) {
-        case "create_room": {
+        case "handshake": {
+          // Handle authentication with JWT token
           if (
             !msg.data ||
             typeof (msg.data as any).version !== "string" ||
             typeof (msg.data as any).name !== "string"
           ) {
+            return send(ws, "error", { reason: "invalid_handshake" });
+          }
+
+          const token = (msg.data as any).token;
+          if (token) {
+            // Verify JWT token
+            const user = verifyToken(token);
+            if (user) {
+              session.userId = user.userId;
+              session.isAuthenticated = true;
+              session.name = user.username;
+              logInfo(
+                `authenticated user: userId=${user.userId} username=${user.username}`
+              );
+            } else {
+              return send(ws, "error", { reason: "invalid_token" });
+            }
+          } else {
+            // Allow unauthenticated connections for classic mode
+            session.name = (msg.data as any).name;
+          }
+
+          session.version = (msg.data as any).version;
+          send(ws, "handshake_accepted", {
+            peer_id: session.peerId || 0,
+            user_id: session.userId,
+            username: session.name,
+          });
+          logInfo(
+            `handshake: name=${session.name} auth=${session.isAuthenticated}`
+          );
+          break;
+        }
+
+        case "create_room": {
+          // Require authentication for global mode
+          if (!session.isAuthenticated) {
+            return send(ws, "error", { reason: "authentication_required" });
+          }
+
+          if (!msg.data || typeof (msg.data as any).gamemode !== "string") {
             return send(ws, "error", { reason: "invalid_create_room" });
           }
+
+          const gamemode = (msg.data as any).gamemode;
+          const mapName = (msg.data as any).map_name || null;
+          const maxPlayers = (msg.data as any).max_players || 8;
+          const isPublic = (msg.data as any).is_public !== false;
+
+          // Create room in memory
           const room = roomManager.createRoom(
-            (msg.data as any).version,
-            (msg.data as any).name,
+            session.version,
+            session.name,
             ip
           );
+
+          // Persist to database
+          roomRepo.createRoom({
+            id: room.id,
+            hostUserId: session.userId!,
+            hostUsername: session.name,
+            gamemode,
+            mapName,
+            maxPlayers,
+            isPublic,
+          });
+
           session.peerId = 1;
-          session.name = (msg.data as any).name;
-          session.version = (msg.data as any).version;
           session.roomId = room.id;
-          send(ws, "room_created", { roomId: room.id, peerId: 1 });
-          logInfo(`room created: roomId=${room.id} host=${session.name}`);
+          send(ws, "room_created", {
+            roomId: room.id,
+            peerId: 1,
+            gamemode,
+          });
+          logInfo(
+            `room created: roomId=${room.id} gamemode=${gamemode} host=${session.name}`
+          );
           break;
         }
 
         case "join_room": {
+          // Require authentication for global mode
+          if (!session.isAuthenticated) {
+            return send(ws, "error", { reason: "authentication_required" });
+          }
+
           if (
             !msg.data ||
             typeof (msg.data as any).roomId !== "string" ||
@@ -145,6 +234,11 @@ export function setupWebSocket(server: http.Server) {
           session.name = (msg.data as any).name;
           session.version = (msg.data as any).version;
           session.roomId = room.id;
+
+          // Update player count in database
+          const memberCount = roomManager.getRoomMembers(room.id).length;
+          roomRepo.updatePlayerCount(room.id, memberCount);
+
           const members = roomManager.getRoomMembers(room.id);
           send(ws, "room_joined", {
             roomId: room.id,
