@@ -88,6 +88,9 @@ var display_version := "beta 13.2pre"
 
 @onready var udp_server : InfoServer = $UDPServer
 
+# Authentication manager for API calls
+var auth_manager: AuthenticationManager
+
 func _ready() -> void:
 	# reset paused state
 	Global.is_paused = false
@@ -96,6 +99,16 @@ func _ready() -> void:
 	# Update the spawnable scenes in case the player left a server.
 	# (re-adds all spawnable objs to the multiplayerspawner)
 	SpawnableObjects.update_spawnable_scenes()
+
+	# Initialize authentication manager
+	auth_manager = AuthenticationManager.new()
+	add_child(auth_manager)
+
+	# Load saved authentication token and user data
+	auth_manager.load_saved_token()
+	print("[Main] Auth token loaded: ", Global.auth_token != "")
+	print("[Main] Authenticated user: ", Global.player_username)
+	print("[Main] Display name: ", Global.player_display_name)
 
 	# ask user before quitting (command and Q are buttons that may both
 	# be used at the same time)
@@ -191,12 +204,16 @@ func _on_new_lan_server(serverInfo : Dictionary) -> void:
 	var lan_entry : PackedScene = load("res://data/scene/ui/LANEntry.tscn")
 	if multiplayer_menu:
 		var new_lan_entry : Control = lan_entry.instantiate()
-		get_node("MultiplayerMenu/PlayMenu/LANPanelContainer/Label").text = "Join a server via LAN"
-		multiplayer_menu.get_node("PlayMenu/LANPanelContainer").add_child(new_lan_entry)
-		new_lan_entry.get_node("Name").text = str(serverInfo.name)
-		new_lan_entry.get_node("Join").connect("pressed", _on_join_pressed.bind(serverInfo.ip, true))
-		new_lan_entry.entry_server_ip = serverInfo.ip
-		lan_entries.append(new_lan_entry)
+		var lan_label : Label = get_node_or_null("MultiplayerMenu/ClassicPlayMenu/LANPanelContainer/Label")
+		if lan_label:
+			lan_label.text = "Join a server via LAN"
+		var lan_container : Control = multiplayer_menu.get_node_or_null("ClassicPlayMenu/LANPanelContainer")
+		if lan_container:
+			lan_container.add_child(new_lan_entry)
+			new_lan_entry.get_node("Name").text = str(serverInfo.name)
+			new_lan_entry.get_node("Join").connect("pressed", _on_join_pressed.bind(serverInfo.ip, true))
+			new_lan_entry.entry_server_ip = serverInfo.ip
+			lan_entries.append(new_lan_entry)
 
 func _on_remove_lan_server(serverIp : String) -> void:
 	for entry : Control in lan_entries:
@@ -205,7 +222,9 @@ func _on_remove_lan_server(serverIp : String) -> void:
 				lan_entries.erase(entry)
 				entry.queue_free()
 				if lan_entries.size() < 1:
-					get_node("MultiplayerMenu/PlayMenu/LANPanelContainer/Label").text = "Searching for LAN servers..."
+					var lan_label : Label = get_node_or_null("MultiplayerMenu/ClassicPlayMenu/LANPanelContainer/Label")
+					if lan_label:
+						lan_label.text = "Searching for LAN servers..."
 
 func verify_display_name(check_string : String) -> Variant:
 	var regex := RegEx.new()
@@ -227,9 +246,14 @@ func get_display_name_from_field() -> Variant:
 		UIHandler.show_alert(str("Display name invalid (", check_result, ")"), 4)
 		display_name_field.text = ""
 		return null
-	# Update Global values (API sync handled by MultiplayerMenu)
+	# Update Global values and sync to backend via API
 	Global.display_name = t_display_name
 	Global.player_display_name = t_display_name
+
+	# Send update to backend if authenticated
+	if auth_manager and Global.auth_token != "":
+		auth_manager.update_display_name(t_display_name)
+
 	return t_display_name
 
 # --- Menu visibility and state management ---

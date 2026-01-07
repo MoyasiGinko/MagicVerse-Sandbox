@@ -62,13 +62,20 @@ func load_saved_token() -> String:
 			var json: JSON = JSON.new()
 			var data: Variant = json.parse_string(file.get_as_text())
 			if data and data.has("token"):
+				var token: String = data["token"]
+				# Load all saved data into Global
+				Global.auth_token = token
 				if data.has("username"):
 					Global.player_username = data["username"]
 				if data.has("display_name"):
 					Global.player_display_name = data["display_name"]
+					Global.display_name = data["display_name"]
 				else:
-					Global.player_display_name = data.get("username", "")
-				return data["token"]
+					var username: String = data.get("username", "")
+					Global.player_display_name = username
+					Global.display_name = username
+				Global.is_authenticated = true
+				return token
 	return ""
 
 ## Save token to disk
@@ -182,12 +189,13 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		verification_complete.emit(response_data["valid"])
 	elif response_data.has("success") and response_data.has("user") and response_data["user"].has("display_name"):
 		# Display name update response
+		print("[AuthMgr] Received display name update response")
 		var new_display_name: String = response_data["user"]["display_name"]
 		Global.player_display_name = new_display_name
 		Global.display_name = new_display_name
 		# Update saved token with new display name
 		save_token(Global.auth_token, Global.player_username, new_display_name)
-		print("Display name updated to: ", new_display_name)
+		print("[AuthMgr] Display name updated to: ", new_display_name)
 	else:
 		print("Unexpected response structure")
 		authentication_failed.emit("Unexpected server response")
@@ -213,11 +221,16 @@ func _validate_inputs(username: String, email: String, password: String) -> bool
 
 ## Update display name
 func update_display_name(new_display_name: String) -> void:
+	print("[AuthMgr] update_display_name called with: ", new_display_name)
+	print("[AuthMgr] Auth token exists: ", Global.auth_token != "")
+
 	if not Global.auth_token:
+		print("[AuthMgr] ERROR: Not authenticated")
 		authentication_failed.emit("Not authenticated")
 		return
 
 	if new_display_name.length() < 1 or new_display_name.length() > 30:
+		print("[AuthMgr] ERROR: Display name length invalid")
 		authentication_failed.emit("Display name must be 1-30 characters")
 		return
 
@@ -229,6 +242,7 @@ func update_display_name(new_display_name: String) -> void:
 		"Authorization: Bearer " + Global.auth_token
 	]
 
+	print("[AuthMgr] Sending PUT request to update display name")
 	_make_request_with_method("PUT", "/api/users/display-name", body, headers)
 
 func _make_request_with_method(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
