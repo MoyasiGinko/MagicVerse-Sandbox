@@ -1,35 +1,38 @@
-[gd_scene load_steps=2 format=3 uid="uid://cjugk5nbwvwpb"]
+[gd_scene load_steps=2 format=3 uid="uid://dohp4r2usrnry"]
 
-[ext_resource type="Script" path="res://src/SplashVerification.gd" id="1_nvpj7"]
+[ext_resource type="Script" uid="uid://ci8wlel2b8mni" path="res://src/SplashVerification.gd" id="1_nvpj7"]
 
 [node name="SplashVerification" type="CanvasLayer"]
 layer = 100
 script = ExtResource("1_nvpj7")
 
 [node name="BannerImage" type="TextureRect" parent="."]
-anchors_fill_parent = true
-expand_ignore_size = true
-stretch_mode = 5
 
 [node name="VerificationOverlay" type="ColorRect" parent="."]
-anchors_fill_parent = true
 color = Color(0, 0, 0, 0.5)
 
 [node name="VBoxContainer" type="VBoxContainer" parent="VerificationOverlay"]
-anchors_fill_parent = true
+layout_mode = 0
+offset_left = 500.0
+offset_top = 500.0
+offset_right = 800.0
+offset_bottom = 636.0
 alignment = 1
 
 [node name="LoadingSpinner" type="Label" parent="VerificationOverlay/VBoxContainer"]
-text = "⏳ Verifying session..."
 custom_minimum_size = Vector2(0, 50)
-alignment = 1
+layout_mode = 2
+text = "⏳ Verifying session..."
+horizontal_alignment = 1
 
 [node name="ProgressBar" type="ProgressBar" parent="VerificationOverlay/VBoxContainer"]
 custom_minimum_size = Vector2(300, 30)
+layout_mode = 2
 size_flags_horizontal = 4
 value = 50.0
 
 [node name="StatusLabel" type="Label" parent="VerificationOverlay/VBoxContainer"]
-text = "Loading..."
 custom_minimum_size = Vector2(0, 40)
-alignment = 1
+layout_mode = 2
+text = "Loading..."
+horizontal_alignment = 1

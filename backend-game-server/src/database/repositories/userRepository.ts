@@ -5,6 +5,7 @@ export interface User {
   username: string;
   email: string;
   password_hash: string;
+  display_name: string | null;
   created_at: string;
   last_login: string | null;
   is_active: boolean;
@@ -21,11 +22,16 @@ export class UserRepository {
 
   createUser(input: CreateUserInput): User {
     const stmt = this.db.prepare(`
-            INSERT INTO users (username, email, password_hash)
-            VALUES (?, ?, ?)
+            INSERT INTO users (username, email, password_hash, display_name)
+            VALUES (?, ?, ?, ?)
         `);
 
-    const result = stmt.run(input.username, input.email, input.password_hash);
+    const result = stmt.run(
+      input.username,
+      input.email,
+      input.password_hash,
+      input.username
+    );
 
     // Create initial stats for the user
     const statsStmt = this.db.prepare(`
@@ -99,5 +105,15 @@ export class UserRepository {
       ORDER BY username ASC
     `);
     return stmt.all(minutesSinceActive) as User[];
+  }
+
+  updateDisplayName(userId: number, displayName: string): User | null {
+    const stmt = this.db.prepare(`
+      UPDATE users
+      SET display_name = ?
+      WHERE id = ?
+    `);
+    stmt.run(displayName, userId);
+    return this.getUserById(userId);
   }
 }

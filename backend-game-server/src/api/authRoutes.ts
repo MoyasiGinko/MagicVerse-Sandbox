@@ -58,6 +58,7 @@ router.post(
       const token = generateToken({
         userId: user.id,
         username: user.username,
+        display_name: user.display_name ?? user.username,
       });
 
       res.status(201).json({
@@ -66,6 +67,7 @@ router.post(
           id: user.id,
           username: user.username,
           email: user.email,
+          display_name: user.display_name ?? user.username,
           created_at: user.created_at,
         },
       });
@@ -116,6 +118,7 @@ router.post(
       const token = generateToken({
         userId: user.id,
         username: user.username,
+        display_name: user.display_name ?? user.username,
       });
 
       res.json({
@@ -124,6 +127,7 @@ router.post(
           id: user.id,
           username: user.username,
           email: user.email,
+          display_name: user.display_name ?? user.username,
         },
       });
     } catch (error) {
@@ -157,6 +161,7 @@ router.get("/verify", async (req: Request, res: Response) => {
       user: {
         id: user.userId,
         username: user.username,
+        display_name: user.display_name ?? user.username,
       },
     });
   } catch (error) {

@@ -26,7 +26,8 @@ var connected_to_server := false
 
 # Authentication properties
 var auth_token: String = ""  # JWT token for authenticated requests
-var player_username: String = ""  # Username of logged-in player
+var player_username: String = ""  # Username of logged-in player (unique identifier)
+var player_display_name: String = ""  # Display name shown in game
 var is_authenticated: bool = false  # Whether user has logged in
 
 # server settings

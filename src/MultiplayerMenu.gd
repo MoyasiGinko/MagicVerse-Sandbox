@@ -19,8 +19,13 @@ class_name MultiplayerMenu
 
 @onready var preview_player : RigidPlayer = Global.get_world().get_current_map().get_node("RigidPlayer")
 @onready var nametag : LineEdit = $DisplayName
+var auth_manager: AuthenticationManager
+var _last_display_name: String = ""
 
 func _ready() -> void:
+	auth_manager = AuthenticationManager.new()
+	add_child(auth_manager)
+
 	Global.connect("appearance_changed", preview_player.change_appearance)
 	$MainMenu/Appearance.connect("pressed", show_appearance_settings)
 	# play hair swing animation on new hair selected
@@ -64,6 +69,13 @@ func _ready() -> void:
 	hair_picker.selected = Global.hair
 	shirt_picker.selected = Global.shirt
 
+	# Initialize display name from authenticated user
+	var current_display: String = Global.player_display_name if Global.player_display_name != "" else Global.display_name
+	_last_display_name = current_display
+	nametag.text = current_display
+	nametag.text_submitted.connect(_on_display_name_submitted)
+	nametag.focus_exited.connect(_on_display_name_focus_exited)
+
 func show_appearance_settings() -> void:
 	$MainMenu.visible = false
 	$AppearanceMenu.visible = true
@@ -98,3 +110,29 @@ func _process(delta : float) -> void:
 		# rotate character when mouse is outside of panel area
 		if $AppearanceMenu.visible && (get_viewport().get_mouse_position().x / get_viewport().size.x < 0.7):
 			preview_player.global_rotation.y = (get_viewport().get_mouse_position().x / get_viewport().size.x) * PI * 2 + (PI*-1.3)
+
+func _on_display_name_focus_exited() -> void:
+	_commit_display_name(nametag.text)
+
+func _on_display_name_submitted(new_text: String) -> void:
+	_commit_display_name(new_text)
+
+func _commit_display_name(raw_text: String) -> void:
+	var trimmed := raw_text.strip_edges()
+	if trimmed == "":
+		nametag.text = _last_display_name
+		return
+
+	if trimmed == _last_display_name:
+		return
+
+	_last_display_name = trimmed
+	nametag.text = trimmed
+
+	# Update global state immediately for UI, backend will persist
+	Global.player_display_name = trimmed
+	Global.display_name = trimmed
+
+	# Send update to backend
+	if auth_manager:
+		auth_manager.update_display_name(trimmed)

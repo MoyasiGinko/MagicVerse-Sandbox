@@ -12,10 +12,30 @@ export function runMigrations(): void {
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            display_name TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_login DATETIME,
             is_active BOOLEAN DEFAULT 1
         )
+    `);
+
+  // Ensure display_name column exists for older databases
+  const columns = db.prepare("PRAGMA table_info(users)").all();
+  const hasDisplayName = columns.some(
+    (col: any) => col.name === "display_name"
+  );
+  if (!hasDisplayName) {
+    db.exec(`
+          ALTER TABLE users
+          ADD COLUMN display_name TEXT
+      `);
+  }
+
+  // Backfill missing display names to match username
+  db.exec(`
+        UPDATE users
+        SET display_name = username
+        WHERE display_name IS NULL OR display_name = ''
     `);
 
   // Player stats table

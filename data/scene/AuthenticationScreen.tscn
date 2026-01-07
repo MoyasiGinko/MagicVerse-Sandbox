@@ -10,17 +10,17 @@ script = ExtResource("1_l05h5")
 color = Color(0.1, 0.1, 0.1, 1)
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
-offset_left = 20.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
+offset_left = 421.0
+offset_top = 97.0
+offset_right = 769.0
+offset_bottom = 608.0
 alignment = 1
 
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 32
-text = "Tinybox - Global Mode"
+text = "Connect to the World"
 
 [node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
 layout_mode = 2

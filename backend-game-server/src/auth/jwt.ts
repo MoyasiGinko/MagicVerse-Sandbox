@@ -7,6 +7,7 @@ const JWT_EXPIRATION = "7d";
 export interface TokenPayload {
   userId: number;
   username: string;
+  display_name?: string;
 }
 
 export function generateToken(payload: TokenPayload): string {

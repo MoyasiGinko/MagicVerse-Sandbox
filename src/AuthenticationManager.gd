@@ -62,14 +62,21 @@ func load_saved_token() -> String:
 			var json: JSON = JSON.new()
 			var data: Variant = json.parse_string(file.get_as_text())
 			if data and data.has("token"):
+				if data.has("username"):
+					Global.player_username = data["username"]
+				if data.has("display_name"):
+					Global.player_display_name = data["display_name"]
+				else:
+					Global.player_display_name = data.get("username", "")
 				return data["token"]
 	return ""
 
 ## Save token to disk
-func save_token(token: String, username: String) -> void:
+func save_token(token: String, username: String, display_name: String = "") -> void:
 	var data: Dictionary = {
 		"token": token,
 		"username": username,
+		"display_name": display_name if display_name else username,
 		"timestamp": Time.get_ticks_msec()
 	}
 
@@ -80,6 +87,8 @@ func save_token(token: String, username: String) -> void:
 	# Also save to Global singleton
 	Global.auth_token = token
 	Global.player_username = username
+	Global.player_display_name = display_name if display_name else username
+	Global.display_name = Global.player_display_name
 
 ## Clear saved token
 func clear_saved_token() -> void:
@@ -87,6 +96,8 @@ func clear_saved_token() -> void:
 		DirAccess.remove_absolute(TOKEN_SAVE_PATH)
 	Global.auth_token = ""
 	Global.player_username = ""
+	Global.player_display_name = ""
+	Global.display_name = ""
 
 ## Private helper to make HTTP requests
 func _make_request(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
@@ -158,11 +169,25 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		# Register or Login response
 		var token: String = response_data["token"]
 		var username: String = response_data["user"]["username"]
-		save_token(token, username)
+		var display_name: String = response_data["user"].get("display_name", username)
+		save_token(token, username, display_name)
 		authentication_complete.emit(token, username)
 	elif response_data.has("valid"):
 		# Verify token response
+		if response_data["valid"] and response_data.has("user"):
+			var v_user: Dictionary = response_data["user"]
+			Global.player_username = v_user.get("username", Global.player_username)
+			Global.player_display_name = v_user.get("display_name", Global.player_username)
+			Global.display_name = Global.player_display_name
 		verification_complete.emit(response_data["valid"])
+	elif response_data.has("success") and response_data.has("user") and response_data["user"].has("display_name"):
+		# Display name update response
+		var new_display_name: String = response_data["user"]["display_name"]
+		Global.player_display_name = new_display_name
+		Global.display_name = new_display_name
+		# Update saved token with new display name
+		save_token(Global.auth_token, Global.player_username, new_display_name)
+		print("Display name updated to: ", new_display_name)
 	else:
 		print("Unexpected response structure")
 		authentication_failed.emit("Unexpected server response")
@@ -185,3 +210,58 @@ func _validate_inputs(username: String, email: String, password: String) -> bool
 		return false
 
 	return true
+
+## Update display name
+func update_display_name(new_display_name: String) -> void:
+	if not Global.auth_token:
+		authentication_failed.emit("Not authenticated")
+		return
+
+	if new_display_name.length() < 1 or new_display_name.length() > 30:
+		authentication_failed.emit("Display name must be 1-30 characters")
+		return
+
+	var body: Dictionary = {
+		"display_name": new_display_name
+	}
+
+	var headers: Array = [
+		"Authorization: Bearer " + Global.auth_token
+	]
+
+	_make_request_with_method("PUT", "/api/users/display-name", body, headers)
+
+func _make_request_with_method(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
+	var url: String = backend_url + endpoint
+	var request_headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"User-Agent: Godot/4.0 (Tinybox)"
+	])
+
+	# Add custom headers
+	for header: String in headers:
+		request_headers.append(header)
+
+	var request_body: String = JSON.stringify(body) if body else ""
+
+	# Convert method string to HTTPClient enum
+	var http_method: HTTPClient.Method
+	match method:
+		"GET":
+			http_method = HTTPClient.METHOD_GET
+		"POST":
+			http_method = HTTPClient.METHOD_POST
+		"PUT":
+			http_method = HTTPClient.METHOD_PUT
+		_:
+			http_method = HTTPClient.METHOD_GET
+
+	print("Making ", method, " request to: ", url)
+	print("Body: ", request_body)
+
+	var error: int = http_request.request(url, request_headers, http_method, request_body)
+
+	if error != OK:
+		print("HTTP Request error: ", error)
+		authentication_failed.emit("Request failed: " + str(error))
+		return
