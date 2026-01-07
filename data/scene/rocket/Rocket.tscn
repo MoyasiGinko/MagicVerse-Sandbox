@@ -1,0 +1,96 @@
+[gd_scene load_steps=12 format=3 uid="uid://dq4jgcqroudj7"]
+
+[ext_resource type="Script" uid="uid://cqlk27wwsdain" path="res://src/Rocket.gd" id="1_a6qbv"]
+[ext_resource type="AudioStream" uid="uid://vtp8j8bjaigv" path="res://data/audio/beep/missile_beep.ogg" id="3_12qq6"]
+[ext_resource type="Material" uid="uid://lk8khdg1bwya" path="res://data/materials/fire/fire_material.tres" id="3_fog8y"]
+[ext_resource type="Script" uid="uid://bffar80lcasfa" path="res://addons/smoothing/smoothing.gd" id="4_x22qc"]
+[ext_resource type="PackedScene" uid="uid://c5akyec0qxnpa" path="res://data/models/rocket_launcher/rocket.blend" id="5_yjb81"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_b7orn"]
+radius = 0.25
+height = 0.7
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_7b3fl"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath(".:linear_velocity")
+properties/1/spawn = true
+properties/1/replication_mode = 2
+properties/2/path = NodePath(".:rotation")
+properties/2/spawn = true
+properties/2/replication_mode = 2
+properties/3/path = NodePath(".:guided")
+properties/3/spawn = true
+properties/3/replication_mode = 2
+
+[sub_resource type="Gradient" id="Gradient_llghf"]
+offsets = PackedFloat32Array(0, 0.135965, 0.618421, 1)
+colors = PackedColorArray(0.922123, 0, 0.161738, 0, 1, 0.324878, 0.0442922, 1, 0.089331, 0.0447418, 0.0165941, 1, 0.313726, 0.313726, 0.313726, 0)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_g6j2x"]
+gradient = SubResource("Gradient_llghf")
+width = 128
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_y5g3m"]
+lifetime_randomness = 0.7
+emission_shape_scale = Vector3(0.2, 0.2, 0.2)
+emission_shape = 1
+emission_sphere_radius = 1.0
+direction = Vector3(0, 0, 0)
+angular_velocity_min = 0.43
+angular_velocity_max = 101.84
+gravity = Vector3(0, 2, 0)
+color_ramp = SubResource("GradientTexture1D_g6j2x")
+turbulence_enabled = true
+turbulence_noise_strength = 0.2
+turbulence_noise_scale = 10.0
+turbulence_noise_speed = Vector3(1, 0, 1)
+turbulence_influence_min = 0.0
+turbulence_influence_max = 0.2
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_82njc"]
+material = ExtResource("3_fog8y")
+size = Vector2(0.6, 0.6)
+orientation = 2
+
+[node name="Rocket" type="RigidBody3D"]
+collision_mask = 9
+mass = 10.0
+gravity_scale = 0.0
+contact_monitor = true
+max_contacts_reported = 1
+linear_damp = 0.001
+script = ExtResource("1_a6qbv")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0, -0.133673)
+shape = SubResource("CapsuleShape3D_b7orn")
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_7b3fl")
+
+[node name="MissileBeep" type="AudioStreamPlayer3D" parent="."]
+stream = ExtResource("3_12qq6")
+max_db = 0.0
+max_distance = 80.0
+panning_strength = 2.0
+bus = &"SFX"
+
+[node name="FireTrail" type="GPUParticles3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.3757683)
+amount = 96
+lifetime = 3.0
+randomness = 1.0
+fixed_fps = 13
+process_material = SubResource("ParticleProcessMaterial_y5g3m")
+draw_pass_1 = SubResource("PlaneMesh_82njc")
+
+[node name="Smoothing" type="Node3D" parent="."]
+script = ExtResource("4_x22qc")
+
+[node name="rocket" parent="Smoothing" instance=ExtResource("5_yjb81")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.60149443)
+
+[node name="target" type="Marker3D" parent="Smoothing"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)

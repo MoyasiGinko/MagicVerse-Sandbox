@@ -1,0 +1,50 @@
+[gd_scene load_steps=7 format=3 uid="uid://dj387li7w0abc"]
+
+[ext_resource type="Script" uid="uid://cg7fox8367q44" path="res://src/EditorBuildTool.gd" id="1_1jwcf"]
+[ext_resource type="AudioStream" uid="uid://btqo5m6d0rhqc" path="res://data/audio/invalid.ogg" id="3_g2inq"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_jq5dr"]
+radius = 0.25
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_c6m80"]
+size = Vector3(0.998, 0.998, 0.998)
+
+[sub_resource type="BoxMesh" id="BoxMesh_besbd"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_8indt"]
+render_priority = 32
+transparency = 1
+depth_draw_mode = 1
+albedo_color = Color(0, 0.729412, 0.462745, 0.133333)
+emission_enabled = true
+emission = Color(0.276499, 0.636238, 0.407413, 1)
+rim_enabled = true
+rim_tint = 1.0
+
+[node name="EditorBuildTool" type="Node3D"]
+script = ExtResource("1_1jwcf")
+type = 1
+
+[node name="InvalidAudio" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("3_g2inq")
+volume_db = -3.0
+bus = &"SFX"
+
+[node name="SelectArea" type="Area3D" parent="."]
+top_level = true
+visible = false
+collision_layer = 16
+collision_mask = 291
+
+[node name="build_collider" type="CollisionShape3D" parent="SelectArea"]
+shape = SubResource("SphereShape3D_jq5dr")
+
+[node name="grab_collider" type="CollisionShape3D" parent="SelectArea"]
+shape = SubResource("BoxShape3D_c6m80")
+disabled = true
+
+[node name="Selector" type="MeshInstance3D" parent="SelectArea"]
+transform = Transform3D(1.02, 0, 0, 0, 1.02, 0, 0, 0, 1.02, 0, 0, 0)
+mesh = SubResource("BoxMesh_besbd")
+skeleton = NodePath("")
+surface_material_override/0 = SubResource("StandardMaterial3D_8indt")
