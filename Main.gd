@@ -143,10 +143,11 @@ func _ready() -> void:
 	lan_listener.connect("new_server", _on_new_lan_server)
 	lan_listener.connect("remove_server", _on_remove_lan_server)
 
-	# Load display name from prefs.
-	var display_pref : Variant = UserPreferences.load_pref("display_name")
-	if display_pref != null:
-		display_name_field.text = str(display_pref)
+	# Load display name from authenticated user (API-based)
+	var current_display: String = Global.player_display_name if Global.player_display_name != "" else Global.display_name
+	if current_display != "":
+		display_name_field.text = current_display
+		Global.display_name = current_display
 
 	# Load join address from prefs.
 	var address : Variant = UserPreferences.load_pref("join_address")
@@ -226,8 +227,9 @@ func get_display_name_from_field() -> Variant:
 		UIHandler.show_alert(str("Display name invalid (", check_result, ")"), 4)
 		display_name_field.text = ""
 		return null
-	# Save the successful name.
-	UserPreferences.save_pref("display_name", t_display_name)
+	# Update Global values (API sync handled by MultiplayerMenu)
+	Global.display_name = t_display_name
+	Global.player_display_name = t_display_name
 	return t_display_name
 
 # --- Menu visibility and state management ---
