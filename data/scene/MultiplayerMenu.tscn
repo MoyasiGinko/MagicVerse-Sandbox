@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3 uid="uid://c5aeyr5rirpm4"]
+[gd_scene load_steps=18 format=3 uid="uid://c5aeyr5rirpm4"]
 
 [ext_resource type="Script" uid="uid://fksufrsb1xj3" path="res://src/MultiplayerMenu.gd" id="1_fgila"]
 [ext_resource type="Texture2D" uid="uid://4biuoel48umc" path="res://title.png" id="2_5iqxy"]
@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://785f2txc3spu" path="res://src/ui/CreditsMenu.gd" id="8_5c1i6"]
 [ext_resource type="Script" uid="uid://ckfgx3scv7ty3" path="res://src/ui/ServerList.gd" id="8_7bulb"]
 [ext_resource type="FontVariation" uid="uid://ckx3gh6vh6t5e" path="res://data/theme_elements/bold_font_variation.tres" id="8_labno"]
+[ext_resource type="Script" path="res://src/GlobalServerList.gd" id="4_8n3km"]
 
 [sub_resource type="Gradient" id="Gradient_t4xug"]
 offsets = PackedFloat32Array(0, 0.281065)
@@ -535,6 +536,7 @@ layout_mode = 2
 custom_minimum_size = Vector2(420, 2.08165e-12)
 layout_mode = 2
 size_flags_vertical = 3
+script = ExtResource("4_8n3km")
 
 [node name="ScrollContainer" type="ScrollContainer" parent="GlobalPlayMenu/ServerList"]
 custom_minimum_size = Vector2(2.08165e-12, 200)

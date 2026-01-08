@@ -22,6 +22,7 @@ class_name MultiplayerMenu
 @onready var quit_dialog : PanelContainer = $QuitDialog
 @onready var shirt_colour_picker : Control = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/ColorPickerButton
 @onready var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
+var global_server_list: Control
 var auth_manager: AuthenticationManager
 var _last_display_name: String = ""
 
@@ -29,11 +30,11 @@ func _ready() -> void:
 	auth_manager = AuthenticationManager.new()
 	add_child(auth_manager)
 
-	Global.connect("appearance_changed", preview_player.change_appearance)
-	$MainMenu/Appearance.connect("pressed", show_appearance_settings)
+	Global.connect("appearance_changed", Callable(preview_player, "change_appearance"))
+	$MainMenu/Appearance.connect("pressed", Callable(self, "show_appearance_settings"))
 	# play hair swing animation on new hair selected
 	#$AppearanceMenu/HairPanel/HairPanelContainer/Picker.connect("item_selected", play_preview_character_appearance_animation)
-	$AppearanceMenu/Back.connect("pressed", hide_appearance_settings)
+	$AppearanceMenu/Back.connect("pressed", Callable(self, "hide_appearance_settings"))
 	$MainMenu/Play.connect("pressed", show_hide.bind("GameModeMenu", "MainMenu"))
 	$GameModeMenu/Back.connect("pressed", show_hide.bind("MainMenu", "GameModeMenu"))
 	$ClassicPlayMenu/Back.connect("pressed", show_hide.bind("GameModeMenu", "ClassicPlayMenu"))
@@ -50,6 +51,10 @@ func _ready() -> void:
 	$"QuitDialog/MarginContainer/Signout & Quit".connect("pressed", _on_quit_sign_out)
 	$"QuitDialog/MarginContainer/Quit".connect("pressed", _on_quit_confirmed)
 	$"QuitDialog/MarginContainer/Cancel".connect("pressed", _on_quit_cancelled)
+
+	# Connect GlobalPlayMenu buttons
+	$GlobalPlayMenu/HostHbox/Host.connect("pressed", _on_global_host_pressed)
+	$GlobalPlayMenu/JoinHbox/Join.connect("pressed", _on_global_join_pressed)
 
 	shirt_colour_picker.connect("color_changed", Global.set_shirt_colour)
 	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
@@ -81,7 +86,13 @@ func _ready() -> void:
 	nametag.text_submitted.connect(_on_display_name_submitted)
 	nametag.focus_exited.connect(_on_display_name_focus_exited)
 
+	# Connect to GlobalServerList signals
+	global_server_list = $GlobalPlayMenu/ServerList
+	if global_server_list and global_server_list.has_signal("room_selected"):
+		global_server_list.room_selected.connect(_on_global_room_selected)
+
 func show_appearance_settings() -> void:
+	"""Show appearance settings menu"""
 	$MainMenu.visible = false
 	$AppearanceMenu.visible = true
 	var map : Node3D = Global.get_world().get_current_map()
@@ -90,6 +101,7 @@ func show_appearance_settings() -> void:
 	preview_player.change_appearance()
 
 func hide_appearance_settings() -> void:
+	"""Hide appearance settings menu"""
 	$MainMenu.visible = true
 	$AppearanceMenu.visible = false
 	var map : Node3D = Global.get_world().get_current_map()
@@ -97,10 +109,6 @@ func hide_appearance_settings() -> void:
 		map.get_node("AnimationPlayer").play("appearance_out")
 	# Save appearance on back
 	Global.save_appearance()
-
-func show_hide(a : String, b : String) -> void:
-	get_node(a).visible = true
-	get_node(b).visible = false
 
 func _on_quit_pressed() -> void:
 	"""Show quit dialog"""
@@ -164,6 +172,38 @@ func _commit_display_name(raw_text: String) -> void:
 	Global.player_display_name = trimmed
 	Global.display_name = trimmed
 
-	# Send update to backend
-	if auth_manager:
-		auth_manager.update_display_name(trimmed)
+# ===== GLOBAL PLAY MENU FUNCTIONS =====
+
+func _on_global_host_pressed() -> void:
+	"""Create and host a new room on the global server"""
+	print("[GlobalPlay] Host button pressed - Creating room on global server")
+	# TODO: Implement room creation API call
+	push_warning("Global room hosting not yet implemented")
+
+func _on_global_join_pressed() -> void:
+	"""Join a room by address/ID"""
+	var address: String = $GlobalPlayMenu/JoinHbox/Address.text.strip_edges()
+	if address == "":
+		print("[GlobalPlay] No address provided")
+		return
+
+	print("[GlobalPlay] Attempting to join room: ", address)
+	# TODO: Implement direct room joining logic
+	push_warning("Direct room joining not yet implemented")
+
+func _on_global_room_selected(room_id: String) -> void:
+	"""Handle room selection from GlobalServerList"""
+	print("[GlobalPlay] Selected room ID: ", room_id)
+	# TODO: Implement WebSocket connection and room joining
+	push_warning("Room joining not yet implemented")
+
+func show_hide(a: String, b: String) -> void:
+	"""Show menu A and hide menu B"""
+	get_node(a).visible = true
+	get_node(b).visible = false
+
+	# Control GlobalServerList refresh based on visibility
+	if a == "GlobalPlayMenu":
+		global_server_list.start_refresh()
+	else:
+		global_server_list.stop_refresh()
