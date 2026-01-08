@@ -67,14 +67,18 @@ func _on_rooms_response(result: int, response_code: int, headers: PackedStringAr
 func _on_create_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	print("[GlobalPMBackend] 📥 Create response:", response_code, " result:", result)
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		print("[GlobalPMBackend] ❌ HTTP error: response_code=", response_code, " result=", result)
 		return
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
+		print("[GlobalPMBackend] ❌ Failed to parse JSON response")
 		return
 	var data := json.data as Dictionary
 	if not data.get("success", false):
+		print("[GlobalPMBackend] ❌ Server responded with success=false")
 		return
 	var room: Dictionary = data.get("room", {}) as Dictionary
 	var room_id: String = str(room.get("id", ""))
+	print("[GlobalPMBackend] ✅ Room created successfully! ID: ", room_id)
 	room_created.emit(room_id, room)

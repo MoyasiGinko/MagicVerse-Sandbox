@@ -62,12 +62,25 @@ export function runMigrations(): void {
             gamemode TEXT NOT NULL,
             map_name TEXT,
             max_players INTEGER DEFAULT 8,
-            current_players INTEGER DEFAULT 1,
+            current_players INTEGER DEFAULT 0,
             is_public BOOLEAN DEFAULT 1,
             is_active BOOLEAN DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             started_at DATETIME,
             FOREIGN KEY (host_user_id) REFERENCES users(id)
+        )
+    `);
+
+  // Player sessions table - tracks real-time WebSocket connections
+  db.exec(`
+        CREATE TABLE IF NOT EXISTS player_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            room_id TEXT NOT NULL,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, room_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
         )
     `);
 

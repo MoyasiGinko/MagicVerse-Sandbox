@@ -775,6 +775,7 @@ func remove_player(peer_id : int) -> void:
 # ============ Backend Selection Methods ============
 
 func _setup_node_backend_host() -> void:
+	print("[Main] === SETTING UP NODE BACKEND AS HOST ===")
 	host_button.text = "Starting server..."
 	host_button.disabled = true
 	if global_host_button:
@@ -790,7 +791,9 @@ func _setup_node_backend_host() -> void:
 	node_peer.connection_failed.connect(_on_connection_failed)
 
 	# Connect to Node backend
+	print("[Main] 🔄 Connecting to Node backend...")
 	if not node_peer.connect_to_server(node_server_url):
+		print("[Main] ❌ Failed to connect to Node backend")
 		host_button.text = "Host server"
 		host_button.disabled = false
 		if global_host_button:
@@ -799,12 +802,24 @@ func _setup_node_backend_host() -> void:
 		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
 		return
 
-	# Send create_room
+	# Wait for WebSocket connection to open
 	await get_tree().create_timer(0.5).timeout
+
+	# Send handshake with authentication
+	print("[Main] 🤝 Sending handshake...")
+	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
+
+	# Wait for handshake to be processed
+	await get_tree().create_timer(0.3).timeout
+
+	# Send create_room
+	print("[Main] 📤 Sending create_room...")
 	node_peer.create_room(str(server_version), Global.display_name)
 
 	# Wait for room creation confirmation
+	print("[Main] ⏳ Waiting for room_created signal...")
 	await node_peer.room_created
+	print("[Main] ✅ Room created successfully!")
 
 	# Load world
 	var world : World = $World
@@ -822,6 +837,8 @@ func _setup_node_backend_host() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _setup_node_backend_client(room_code: String = "") -> void:
+	print("[Main] === SETTING UP NODE BACKEND AS CLIENT ===")
+	print("[Main] Room code: ", room_code)
 	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
 	if global_join_button:
 		global_join_button.text = "Connecting..."
@@ -836,7 +853,9 @@ func _setup_node_backend_client(room_code: String = "") -> void:
 	node_peer.connection_failed.connect(_on_connection_failed)
 
 	# Connect to Node backend
+	print("[Main] 🔄 Connecting to Node backend...")
 	if not node_peer.connect_to_server(node_server_url):
+		print("[Main] ❌ Failed to connect to Node backend")
 		join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
 		if global_join_button:
 			global_join_button.text = "Join (Global)"
@@ -844,10 +863,20 @@ func _setup_node_backend_client(room_code: String = "") -> void:
 		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
 		return
 
-	# Send join_room
+	# Wait for WebSocket connection to open
 	await get_tree().create_timer(0.5).timeout
+
+	# Send handshake with authentication
+	print("[Main] 🤝 Sending handshake...")
+	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
+
+	# Wait for handshake to be processed
+	await get_tree().create_timer(0.3).timeout
+
+	# Send join_room
 	if room_code.is_empty():
 		room_code = join_address.text
+	print("[Main] 📤 Sending join_room for: ", room_code)
 	node_peer.join_room(room_code, str(server_version), Global.display_name)
 
 	# Load world

@@ -64,6 +64,8 @@ func _on_ws_message() -> void:
 	var msg_data: Dictionary = data.get("data", {})
 
 	match msg_type:
+		"handshake_accepted":
+			_handle_handshake_accepted(msg_data)
 		"state":
 			_handle_state(msg_data)
 		"rpc":
@@ -72,8 +74,37 @@ func _on_ws_message() -> void:
 			_handle_sync(msg_data)
 		"error":
 			_handle_error(msg_data)
+		"room_created":
+			_handle_room_created(msg_data)
+		"room_joined":
+			_handle_room_joined(msg_data)
 		_:
 			push_warning("Unknown message type: " + str(msg_type))
+
+func _handle_handshake_accepted(data: Dictionary) -> void:
+	print("[NodeAdapter] ✅ Handshake accepted")
+	print("[NodeAdapter] User ID: ", data.get("user_id", "N/A"))
+	print("[NodeAdapter] Username: ", data.get("username", "N/A"))
+
+func _handle_room_created(data: Dictionary) -> void:
+	_room_id = data.get("roomId", "")
+	_peer_id = data.get("peerId", 1)
+	print("[NodeAdapter] ✅ Room created: ", _room_id, " (peer ", _peer_id, ")")
+	room_created.emit(_room_id)
+	UIHandler.show_alert("Room created: " + _room_id, 6, false, UIHandler.alert_colour_player)
+
+func _handle_room_joined(data: Dictionary) -> void:
+	_room_id = data.get("roomId", "")
+	_peer_id = data.get("peerId", 0)
+	var peers: Array = data.get("peers", [])
+	_connected_peers.clear()
+	for p: Variant in peers:
+		if typeof(p) == TYPE_INT:
+			_connected_peers.append(p as int)
+		elif typeof(p) == TYPE_FLOAT:
+			_connected_peers.append(int(p as float))
+	print("[NodeAdapter] ✅ Room joined: ", _room_id, " (peer ", _peer_id, ")")
+	room_joined.emit(_peer_id, _room_id)
 
 func _handle_state(data: Dictionary) -> void:
 	var state_type: String = data.get("type", "")
@@ -148,11 +179,27 @@ func _send_message(msg_type: String, msg_data: Dictionary) -> void:
 	ws.send_text(json_str)
 
 # Protocol methods
-func create_room(version: String, player_name: String) -> void:
+func send_handshake(version: String, player_name: String, token: String = "") -> void:
+	"""Send handshake with authentication token"""
+	var handshake_data: Dictionary = {
+		"version": version,
+		"name": player_name
+	}
+	if token != "":
+		handshake_data["token"] = token
+	_send_message("handshake", handshake_data)
+	print("[NodeAdapter] 🤝 Sent handshake: version=", version, " name=", player_name, " auth=", token != "")
+
+func create_room(version: String, player_name: String, gamemode: String = "deathmatch", map_name: String = "", max_players: int = 8, is_public: bool = true) -> void:
 	_send_message("create_room", {
 		"version": version,
-		"playerName": player_name
+		"playerName": player_name,
+		"gamemode": gamemode,
+		"map_name": map_name,
+		"max_players": max_players,
+		"is_public": is_public
 	})
+	print("[NodeAdapter] 📤 Sent create_room request")
 
 func join_room(room_id: String, version: String, player_name: String) -> void:
 	_send_message("join_room", {

@@ -203,25 +203,57 @@ func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	print("[Menu] === ROOM CREATED SIGNAL RECEIVED ===")
 	print("[Menu] Room ID: ", room_id)
 	print("[Menu] Room data: ", room_data)
-	# TODO: Connect to the new room via WebSocket and start hosting
-	print("[Menu] ⏳ Waiting for WebSocket implementation...")
+	print("[Menu] 🔄 Connecting to WebSocket and hosting room...")
 
-func _on_global_join_pressed() -> void:
-	"""Join a room by address/ID"""
-	var address: String = $GlobalPlayMenu/JoinHbox/RoomAddress.text.strip_edges()
-	if address == "":
-		print("[GlobalPlay] No address provided")
+	# Get Main node
+	var main: Main = get_tree().current_scene as Main
+	if not main:
+		print("[Menu] ❌ Failed to get Main node")
 		return
 
-	print("[GlobalPlay] Attempting to join room: ", address)
+	# Set play mode to global and backend to node
+	main.play_mode = "global"
+	main.backend = "node"
+
+	# Connect to Node backend as host with the created room ID
+	print("[Menu] ✅ Calling _setup_node_backend_host()")
+	main._setup_node_backend_host()
+
+func _on_global_join_pressed() -> void:
+	"""Join a room by address/ID (manual join via text input)"""
+	var address: String = $GlobalPlayMenu/JoinHbox/RoomAddress.text.strip_edges()
+	print("[Menu] === JOIN BUTTON PRESSED (manual input) ===")
+	if address == "":
+		print("[Menu] ❌ No address provided")
+		return
+
+	print("[Menu] 🔄 Attempting to join room via address: ", address)
 	# TODO: Implement direct room joining logic
 	push_warning("Direct room joining not yet implemented")
 
 func _on_global_room_selected(room_id: String) -> void:
 	"""Handle room selection from GlobalServerList"""
-	print("[GlobalPlay] Selected room ID: ", room_id)
-	# TODO: Implement WebSocket connection and room joining
-	push_warning("Room joining not yet implemented")
+	print("[Menu] === ROOM SELECTED FROM SERVER LIST ===")
+	print("[Menu] 🎯 Room ID: ", room_id)
+	if not Global.is_authenticated or Global.auth_token == "":
+		print("[Menu] ❌ Not authenticated; cannot join room")
+		return
+	print("[Menu] ✅ User authenticated")
+	print("[Menu] 🔄 Connecting to WebSocket and joining room...")
+
+	# Get Main node
+	var main: Main = get_tree().current_scene as Main
+	if not main:
+		print("[Menu] ❌ Failed to get Main node")
+		return
+
+	# Set play mode to global and backend to node
+	main.play_mode = "global"
+	main.backend = "node"
+
+	# Connect to Node backend as client and join the room
+	print("[Menu] ✅ Calling _setup_node_backend_client() with room_id: ", room_id)
+	main._setup_node_backend_client(room_id)
 
 func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""

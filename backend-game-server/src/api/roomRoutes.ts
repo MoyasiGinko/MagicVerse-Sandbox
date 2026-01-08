@@ -40,6 +40,21 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       return;
     }
 
+    // Check if user already has an active room
+    const existingRoom = roomRepo.getPlayerCurrentRoom(userId);
+    if (existingRoom) {
+      console.log(
+        "[RoomAPI] ❌ User already has active room:",
+        existingRoom.id
+      );
+      res.status(400).json({
+        error:
+          "You already have an active room. Leave it before creating a new one.",
+        existing_room_id: existingRoom.id,
+      });
+      return;
+    }
+
     // Generate unique room ID
     const roomId = `room_${Date.now()}_${Math.random()
       .toString(36)
@@ -57,7 +72,9 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       maxPlayers: maxPlayers || 8,
       isPublic: isPublic !== false,
     });
-    console.log("[RoomAPI] ✅ Room created successfully");
+    console.log(
+      "[RoomAPI] ✅ Room created successfully (current_players=0, awaiting WebSocket join)"
+    );
 
     console.log("[RoomAPI] 📤 Sending response with room data");
     res.status(201).json({

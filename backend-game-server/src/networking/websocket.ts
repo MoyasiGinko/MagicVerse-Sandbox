@@ -72,20 +72,19 @@ function validateJson(raw: string): Message | null {
 function cleanupClient(ws: WebSocket) {
   const session = clientSessions.get(ws);
   if (!session) return;
-  const { roomId, peerId } = session;
+  const { roomId, peerId, userId } = session;
   clientSessions.delete(ws);
   if (roomId && peerId !== null) {
     const room = roomManager.getRoom(roomId);
     if (room) {
       roomManager.leaveRoom(roomId, peerId);
 
-      // Update database player count
-      const remainingMembers = roomManager.getRoomMembers(roomId);
-      if (remainingMembers.length > 0) {
-        roomRepo.updatePlayerCount(roomId, remainingMembers.length);
-      } else {
-        // Room is empty, mark as inactive in database
-        roomRepo.setRoomActive(roomId, false);
+      // Remove player from session (decrements player count)
+      if (userId) {
+        roomRepo.removePlayerSession(userId, roomId);
+        console.log(
+          `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`
+        );
       }
 
       broadcast(room, "peer_left", { peerId }, peerId);
@@ -193,6 +192,12 @@ export function setupWebSocket(server: http.Server) {
             isPublic,
           });
 
+          // Add host to room session (increments player count to 1)
+          roomRepo.addPlayerSession(session.userId!, room.id);
+          console.log(
+            `[WebSocket] 👑 Host ${session.userId} joined room ${room.id}`
+          );
+
           session.peerId = 1;
           session.roomId = room.id;
           send(ws, "room_created", {
@@ -234,6 +239,12 @@ export function setupWebSocket(server: http.Server) {
           session.name = (msg.data as any).name;
           session.version = (msg.data as any).version;
           session.roomId = room.id;
+
+          // Add player to room session (enforces single-room, increments player count)
+          roomRepo.addPlayerSession(session.userId!, room.id);
+          console.log(
+            `[WebSocket] 🎮 Player ${session.userId} joined room ${room.id}`
+          );
 
           // Update player count in database
           const memberCount = roomManager.getRoomMembers(room.id).length;

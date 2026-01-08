@@ -199,13 +199,17 @@ func _show_error_state(error_message: String) -> void:
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
-	var gamemode: String = room.get("gamemode", "Unknown")
-	var map: String = room.get("map_name", "Unknown")
+	var gamemode: String = room.get("gamemode", "Unknown") as String
+	var map: String = room.get("map_name", "Unknown") as String
+	var host: String = room.get("host_username", "Unknown") as String
+	var current_players: int = room.get("current_players", 0) as int
+	var max_players: int = room.get("max_players", 8) as int
 	print("[ServerList] 🎯 JOIN BUTTON CLICKED for room: ", room_id)
-	print("[ServerList] 📥 Room details: Gamemode=", gamemode, " Map=", map)
+	print("[ServerList] 📥 Room details: Gamemode=", gamemode, " Map=", map, " Host=", host)
+	print("[ServerList] 👥 Players: ", current_players, "/", max_players)
 	print("[ServerList] 📤 Emitting room_selected signal with ID: ", room_id)
 	room_selected.emit(room_id)
-	# TODO: Implement WebSocket connection and room joining
+	print("[ServerList] ✅ room_selected signal emitted successfully")
 
 func get_room_by_id(room_id: String) -> Dictionary:
 	"""Get room data by ID"""
