@@ -2,6 +2,11 @@
   "ui": {
     "close": "Close",
     "cancel": "Cancel",
+    "create": "Create",
+    "delete": "Delete",
+    "delete_confirm": "Are you sure you want to delete this?",
+    "yes_delete": "Yes, Delete",
+    "exit": "Exit to Main Menu",
     "quit": "Quit To Desktop",
     "sign_out_quit": "Sign Out & Quit",
     "play": "Play",

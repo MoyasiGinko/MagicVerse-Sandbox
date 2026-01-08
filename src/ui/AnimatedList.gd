@@ -26,14 +26,22 @@ func _on_visibility_changed() -> void:
 		animate_list()
 
 func animate_list() -> void:
+	var controls: Array[Control] = []
+	for child in get_children():
+		var c := child as Control
+		if c != null:
+			controls.append(c)
+	if controls.is_empty():
+		return
+
 	var count : float = 0
-	for c : Control in get_children():
+	for c in controls:
 		count += 1
 		c.modulate = Color(1, 1, 1, 0)
 	# don't make animation any slower than 0.15s intervals
 	count = clamp(count, 8, 999)
 	# animate list in downward fashion
-	for c : Control in get_children():
+	for c in controls:
 		var tween : Tween = get_tree().create_tween().set_parallel(false)
 		tween.tween_property(c, "modulate", Color(1, 1, 1, 1), 0.3)
 		if !is_visible_in_tree():

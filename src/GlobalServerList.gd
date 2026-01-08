@@ -21,15 +21,19 @@ signal room_selected(room_id: String)
 
 @onready var scroll_container: ScrollContainer = $ScrollContainer
 @onready var list_container: VBoxContainer = $ScrollContainer/List
-var room_list_http: HTTPRequest
+@export var backend_path: NodePath = NodePath("../Backend")
+var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
 var current_rooms: Array = []
 
 func _ready() -> void:
-	# Setup HTTP request
-	room_list_http = HTTPRequest.new()
-	add_child(room_list_http)
-	room_list_http.request_completed.connect(_on_room_list_received)
+	print("[ServerList] Initializing...")
+	# Resolve backend reference via exported path
+	backend = get_node_or_null(backend_path) as GlobalPlayMenuBackend
+	# Connect to backend rooms fetched
+	if backend and backend.has_signal("rooms_fetched"):
+		backend.rooms_fetched.connect(_on_rooms_fetched)
+		print("[ServerList] Backend rooms_fetched signal connected")
 
 	# Setup auto-refresh timer (5 seconds)
 	refresh_timer = Timer.new()
@@ -37,10 +41,16 @@ func _ready() -> void:
 	refresh_timer.timeout.connect(refresh_server_list)
 	refresh_timer.wait_time = 5.0
 	refresh_timer.autostart = false
+	print("[ServerList] Auto-refresh timer created (5 second interval)")
 
 	# Initial load
 	if Global.is_authenticated:
+		print("[ServerList] User authenticated, loading initial server list")
 		refresh_server_list()
+	else:
+		print("[ServerList] User not authenticated yet, skipping initial load")
+
+	print("[ServerList] Initialization complete!")
 
 func start_refresh() -> void:
 	"""Start auto-refreshing the server list"""
@@ -55,67 +65,41 @@ func stop_refresh() -> void:
 
 func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
+	print("[ServerList] === REFRESH REQUEST ===")
 	if not Global.is_authenticated or Global.auth_token == "":
-		print("[ServerList] Not authenticated, skipping refresh")
+		print("[ServerList] ❌ Not authenticated, skipping refresh")
 		return
+	print("[ServerList] 🔄 Requesting rooms via backend...")
+	if backend:
+		backend.fetch_rooms()
+	else:
+		print("[ServerList] ❌ Backend not found; cannot fetch rooms")
 
-	var url: String = "http://localhost:30820/api/rooms"
-	var headers: PackedStringArray = [
-		"Authorization: Bearer " + Global.auth_token,
-		"Content-Type: application/json"
-	]
-
-	print("[ServerList] Fetching server list from: ", url)
-	var error := room_list_http.request(url, headers)
-	if error != OK:
-		print("[ServerList] HTTP Request failed with error: ", error)
-
-func _on_room_list_received(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	"""Handle server list response from API"""
-	if result != HTTPRequest.RESULT_SUCCESS:
-		print("[ServerList] Request failed with result: ", result)
-		_show_error_state("Connection Failed")
-		return
-
-	if response_code < 200 or response_code >= 300:
-		print("[ServerList] Bad response code: ", response_code)
-		_show_error_state("Server Error: %d" % response_code)
-		return
-
-	var json_string := body.get_string_from_utf8()
-	var json := JSON.new()
-	var parse_error := json.parse(json_string)
-
-	if parse_error != OK:
-		print("[ServerList] JSON parse error at line ", json.get_error_line(), ": ", json.get_error_message())
-		_show_error_state("Invalid Response")
-		return
-
-	var data: Dictionary = json.data
-	if not data.has("rooms"):
-		print("[ServerList] Response missing 'rooms' field")
-		_show_error_state("Invalid Response")
-		return
-
-	var rooms: Array = data.get("rooms", []) as Array
+func _on_rooms_fetched(rooms: Array) -> void:
+	"""Handle rooms fetched from backend script"""
+	print("[ServerList] 📥 Backend returned ", rooms.size(), " rooms")
 	current_rooms = rooms
 	_populate_server_list(rooms)
 
 func _populate_server_list(rooms: Array) -> void:
 	"""Populate the UI with rooms from the server"""
 	# Clear existing list
+	print("[ServerList] 🔄 Clearing old list container...")
 	for child in list_container.get_children():
 		child.queue_free()
 
-	print("[ServerList] Populating with ", rooms.size(), " rooms")
+	print("[ServerList] ✅ Populating with ", rooms.size(), " rooms")
 
 	if rooms.is_empty():
+		print("[ServerList] ⚠️ No rooms available, showing empty state")
 		_show_empty_state()
 		return
 
 	# Create a panel for each room
 	for room_data: Variant in rooms:
 		var room: Dictionary = room_data as Dictionary
+		var room_id: String = str(room.get("id", "?"))
+		print("[ServerList] 📋 Creating entry for room: ", room_id)
 		_create_room_entry(room)
 
 func _create_room_entry(room: Dictionary) -> void:
@@ -137,6 +121,7 @@ func _create_room_entry(room: Dictionary) -> void:
 	var gamemode: String = room.get("gamemode", "Unknown")
 	var map_name: String = room.get("map_name", "Unknown Map")
 	title_label.text = "%s - %s" % [gamemode, map_name]
+	print("[ServerList] 🎮 Room gamemode: ", gamemode, ", map: ", map_name)
 	title_label.add_theme_font_size_override("font_size", 14)
 	info_vbox.add_child(title_label)
 
@@ -144,6 +129,7 @@ func _create_room_entry(room: Dictionary) -> void:
 	var host_label := Label.new()
 	var host_username: String = room.get("host_username", "Unknown")
 	host_label.text = "Host: %s" % host_username
+	print("[ServerList] 👤 Room host: ", host_username)
 	host_label.modulate = Color(1, 1, 1, 0.6)
 	host_label.add_theme_font_size_override("font_size", 10)
 	info_vbox.add_child(host_label)
@@ -159,6 +145,7 @@ func _create_room_entry(room: Dictionary) -> void:
 
 	var player_count_label := Label.new()
 	player_count_label.text = "%d / %d" % [current_players, max_players]
+	print("[ServerList] 👥 Room players: ", current_players, "/", max_players, " [Full: ", is_full, "]")
 	player_count_label.add_theme_font_size_override("font_size", 12)
 
 	if is_full:
@@ -175,15 +162,18 @@ func _create_room_entry(room: Dictionary) -> void:
 	join_button.disabled = is_full
 
 	var room_id: String = str(room.get("id", ""))
+	print("[ServerList] 🔗 Connecting join button for room: ", room_id)
 	join_button.pressed.connect(_on_room_join_clicked.bind(room_id, room))
 
 	hbox.add_child(join_button)
 
 	# Add to list
+	print("[ServerList] ✅ Adding room entry to container")
 	list_container.add_child(container)
 
 func _show_empty_state() -> void:
 	"""Show empty state when no rooms available"""
+	print("[ServerList] 📭 Displaying empty state - no active rooms")
 	var label := Label.new()
 	label.text = "No active rooms"
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -194,6 +184,7 @@ func _show_empty_state() -> void:
 
 func _show_error_state(error_message: String) -> void:
 	"""Show error state"""
+	print("[ServerList] ❌ Displaying error state: ", error_message)
 	for child in list_container.get_children():
 		child.queue_free()
 
@@ -204,11 +195,15 @@ func _show_error_state(error_message: String) -> void:
 	label.modulate = Color(1, 0.5, 0.5, 0.8)
 	label.custom_minimum_size = Vector2(0, 100)
 	list_container.add_child(label)
-	print("[ServerList] Error: ", error_message)
+	print("[ServerList] ❌ Error message displayed to user: ", error_message)
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
-	print("[ServerList] Joining room: ", room_id)
+	var gamemode: String = room.get("gamemode", "Unknown")
+	var map: String = room.get("map_name", "Unknown")
+	print("[ServerList] 🎯 JOIN BUTTON CLICKED for room: ", room_id)
+	print("[ServerList] 📥 Room details: Gamemode=", gamemode, " Map=", map)
+	print("[ServerList] 📤 Emitting room_selected signal with ID: ", room_id)
 	room_selected.emit(room_id)
 	# TODO: Implement WebSocket connection and room joining
 

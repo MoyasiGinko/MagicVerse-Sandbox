@@ -22,7 +22,8 @@ class_name MultiplayerMenu
 @onready var quit_dialog : PanelContainer = $QuitDialog
 @onready var shirt_colour_picker : Control = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/ColorPickerButton
 @onready var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
-var global_server_list: Control
+var global_server_list: GlobalServerList
+var room_creation_dialog: RoomCreationDialog
 var auth_manager: AuthenticationManager
 var _last_display_name: String = ""
 
@@ -52,9 +53,10 @@ func _ready() -> void:
 	$"QuitDialog/MarginContainer/Quit".connect("pressed", _on_quit_confirmed)
 	$"QuitDialog/MarginContainer/Cancel".connect("pressed", _on_quit_cancelled)
 
-	# Connect GlobalPlayMenu buttons
-	$GlobalPlayMenu/HostHbox/Host.connect("pressed", _on_global_host_pressed)
-	$GlobalPlayMenu/JoinHbox/Join.connect("pressed", _on_global_join_pressed)
+	# Connect GlobalPlayMenu buttons (renamed to avoid classic menu collisions)
+	$GlobalPlayMenu/HostHbox/HostServer.connect("pressed", _on_global_host_pressed)
+	$GlobalPlayMenu/JoinHbox/JoinRoom.connect("pressed", _on_global_join_pressed)
+	print("[Menu] GlobalPlayMenu host/join buttons connected")
 
 	shirt_colour_picker.connect("color_changed", Global.set_shirt_colour)
 	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
@@ -90,15 +92,27 @@ func _ready() -> void:
 	global_server_list = $GlobalPlayMenu/ServerList
 	if global_server_list and global_server_list.has_signal("room_selected"):
 		global_server_list.room_selected.connect(_on_global_room_selected)
+		print("[Menu] GlobalServerList connected")
+
+	# Connect to RoomCreationDialog signals
+	room_creation_dialog = $RoomCreationDialog
+	if room_creation_dialog and room_creation_dialog.has_signal("room_created"):
+		room_creation_dialog.room_created.connect(_on_room_created)
+		print("[Menu] RoomCreationDialog connected")
+
+	print("[Menu] MultiplayerMenu initialization complete!")
+	# Default to MainMenu on startup; hide appearance until requested
+	$MainMenu.visible = true
+	$AppearanceMenu.visible = false
+	preview_player.change_appearance()
 
 func show_appearance_settings() -> void:
-	"""Show appearance settings menu"""
+	"""Show appearance settings menu with animation"""
 	$MainMenu.visible = false
 	$AppearanceMenu.visible = true
 	var map : Node3D = Global.get_world().get_current_map()
 	if map.has_node("AnimationPlayer"):
 		map.get_node("AnimationPlayer").play("appearance_in")
-	preview_player.change_appearance()
 
 func hide_appearance_settings() -> void:
 	"""Hide appearance settings menu"""
@@ -175,14 +189,26 @@ func _commit_display_name(raw_text: String) -> void:
 # ===== GLOBAL PLAY MENU FUNCTIONS =====
 
 func _on_global_host_pressed() -> void:
-	"""Create and host a new room on the global server"""
-	print("[GlobalPlay] Host button pressed - Creating room on global server")
-	# TODO: Implement room creation API call
-	push_warning("Global room hosting not yet implemented")
+	"""Open room creation dialog"""
+	print("[Menu] === HOST BUTTON PRESSED ===")
+	print("[Menu] Opening room creation dialog")
+	if room_creation_dialog:
+		room_creation_dialog.show_dialog()
+		print("[Menu] Room creation dialog opened")
+	else:
+		print("[Menu] ❌ Room creation dialog not found!")
+
+func _on_room_created(room_id: String, room_data: Dictionary) -> void:
+	"""Handle new room creation"""
+	print("[Menu] === ROOM CREATED SIGNAL RECEIVED ===")
+	print("[Menu] Room ID: ", room_id)
+	print("[Menu] Room data: ", room_data)
+	# TODO: Connect to the new room via WebSocket and start hosting
+	print("[Menu] ⏳ Waiting for WebSocket implementation...")
 
 func _on_global_join_pressed() -> void:
 	"""Join a room by address/ID"""
-	var address: String = $GlobalPlayMenu/JoinHbox/Address.text.strip_edges()
+	var address: String = $GlobalPlayMenu/JoinHbox/RoomAddress.text.strip_edges()
 	if address == "":
 		print("[GlobalPlay] No address provided")
 		return
