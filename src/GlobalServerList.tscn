@@ -1,0 +1,29 @@
+[gd_scene load_steps=2 format=3 uid="uid://cab02uvik7wlk"]
+
+[ext_resource type="Script" uid="uid://b57y5y75a2occ" path="res://src/GlobalServerList.gd" id="1_u5isx"]
+
+[node name="GlobalServerList" type="PanelContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_u5isx")
+backend_path = null
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="RefreshButton" type="Button" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "🔄 Refresh"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="List" type="VBoxContainer" parent="VBoxContainer/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3

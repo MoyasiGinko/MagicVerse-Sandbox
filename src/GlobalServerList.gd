@@ -19,8 +19,9 @@ class_name GlobalServerList
 
 signal room_selected(room_id: String)
 
-@onready var scroll_container: ScrollContainer = $ScrollContainer
-@onready var list_container: VBoxContainer = $ScrollContainer/List
+var scroll_container: ScrollContainer
+var list_container: VBoxContainer
+var refresh_button: Button
 @export var backend_path: NodePath = NodePath("../Backend")
 var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
@@ -30,6 +31,26 @@ var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
 
 func _ready() -> void:
 	print("[ServerList] Initializing...")
+
+	# Find scroll container and list - handle both old standalone and new embedded layout
+	if has_node("MainVBox/ScrollContainer"):
+		# New embedded layout (MultiplayerMenu)
+		scroll_container = get_node("MainVBox/ScrollContainer") as ScrollContainer
+		list_container = get_node("MainVBox/ScrollContainer/List") as VBoxContainer
+		refresh_button = get_node("MainVBox/RefreshButton") as Button
+	elif has_node("VBoxContainer/ScrollContainer"):
+		# Standalone scene layout
+		scroll_container = get_node("VBoxContainer/ScrollContainer") as ScrollContainer
+		list_container = get_node("VBoxContainer/ScrollContainer/List") as VBoxContainer
+		refresh_button = get_node("VBoxContainer/RefreshButton") as Button
+	else:
+		# Legacy layout (fallback)
+		scroll_container = get_node_or_null("ScrollContainer") as ScrollContainer
+		list_container = get_node_or_null("ScrollContainer/List") as VBoxContainer
+		if not list_container:
+			push_error("[ServerList] ❌ Could not find List container!")
+			return
+
 	# Resolve backend reference via exported path
 	backend = get_node_or_null(backend_path) as GlobalPlayMenuBackend
 	# Connect to backend rooms fetched
@@ -41,6 +62,11 @@ func _ready() -> void:
 	_http_refresh = HTTPRequest.new()
 	add_child(_http_refresh)
 	_http_refresh.request_completed.connect(_on_refresh_response)
+
+	# Connect refresh button if it exists
+	if refresh_button:
+		refresh_button.pressed.connect(_on_refresh_button_pressed)
+		print("[ServerList] 🔘 Refresh button connected")
 
 	# Get reference to WebSocket Manager
 	ws_manager = get_tree().root.get_child(0).get_node_or_null("WSManager") as GlobalWebSocketManager
@@ -102,6 +128,11 @@ func _on_rooms_changed_websocket() -> void:
 func _on_websocket_connected() -> void:
 	"""Handle WebSocket connection established"""
 	print("[ServerList] 🔌 WebSocket connected, refreshing server list")
+	refresh_server_list()
+
+func _on_refresh_button_pressed() -> void:
+	"""Handle manual refresh button press"""
+	print("[ServerList] 🔘 Manual refresh button pressed")
 	refresh_server_list()
 
 func _populate_server_list(rooms: Array) -> void:
