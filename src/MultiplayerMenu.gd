@@ -203,7 +203,7 @@ func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	print("[Menu] === ROOM CREATED SIGNAL RECEIVED ===")
 	print("[Menu] Room ID: ", room_id)
 	print("[Menu] Room data: ", room_data)
-	print("[Menu] 🔄 Connecting to WebSocket and hosting room...")
+	print("[Menu] 🔄 Connecting to WebSocket and joining the created room...")
 
 	# Get Main node
 	var main: Main = get_tree().current_scene as Main
@@ -215,9 +215,15 @@ func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	main.play_mode = "global"
 	main.backend = "node"
 
-	# Connect to Node backend as host with the created room ID
-	print("[Menu] ✅ Calling _setup_node_backend_host()")
-	main._setup_node_backend_host()
+	# Extract map and gamemode from room data
+	var map_name: String = str(room_data.get("map_name", ""))
+	var gamemode: String = str(room_data.get("gamemode", ""))
+	print("[Menu] 📋 Room settings - Map: ", map_name, " Gamemode: ", gamemode)
+
+	# Connect to Node backend as CLIENT and join the room that was just created
+	# (Room was already created via HTTP, now we need to join it via WebSocket)
+	print("[Menu] ✅ Calling _setup_node_backend_client() to join room: ", room_id)
+	main._setup_node_backend_client(room_id, map_name, gamemode)
 
 func _on_global_join_pressed() -> void:
 	"""Join a room by address/ID (manual join via text input)"""
@@ -231,10 +237,11 @@ func _on_global_join_pressed() -> void:
 	# TODO: Implement direct room joining logic
 	push_warning("Direct room joining not yet implemented")
 
-func _on_global_room_selected(room_id: String) -> void:
+func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	"""Handle room selection from GlobalServerList"""
 	print("[Menu] === ROOM SELECTED FROM SERVER LIST ===")
 	print("[Menu] 🎯 Room ID: ", room_id)
+	print("[Menu] 📋 Room data: ", room_data)
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[Menu] ❌ Not authenticated; cannot join room")
 		return
@@ -251,9 +258,14 @@ func _on_global_room_selected(room_id: String) -> void:
 	main.play_mode = "global"
 	main.backend = "node"
 
+	# Extract map and gamemode from room data
+	var map_name: String = str(room_data.get("map_name", ""))
+	var gamemode: String = str(room_data.get("gamemode", ""))
+	print("[Menu] 🗺️  Room settings - Map: ", map_name, " Gamemode: ", gamemode)
+
 	# Connect to Node backend as client and join the room
 	print("[Menu] ✅ Calling _setup_node_backend_client() with room_id: ", room_id)
-	main._setup_node_backend_client(room_id)
+	main._setup_node_backend_client(room_id, map_name, gamemode)
 
 func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""

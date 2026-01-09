@@ -56,16 +56,11 @@ export class RoomManager {
       hostPeerId: 1,
       version,
       clients: new Map(),
-      nextPeerId: 2,
+      nextPeerId: 1, // Start at 1 so first joiner gets peerId=1
       currentTbw: [],
       bannedIps: new Set(),
     };
-    room.clients.set(1, {
-      peerId: 1,
-      name: hostName,
-      version,
-      isHost: true,
-    });
+    // Don't add phantom host - let first joiner become host with peerId=1
     this.rooms.set(roomId, room);
     return room;
   }

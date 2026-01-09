@@ -7,6 +7,8 @@ signal room_created(room_id: String)
 signal room_joined(peer_id: int, room_id: String)
 signal connection_failed(reason: String)
 signal rooms_list_changed  # New signal for room list changes
+signal peer_connected(peer_id: int)  # For multiplayer system integration
+signal peer_disconnected(peer_id: int)  # For multiplayer system integration
 
 var ws: WebSocketPeer = null
 var server_url: String = "ws://localhost:30820"
@@ -14,6 +16,7 @@ var _peer_id: int = 0
 var _room_id: String = ""
 var _connected_peers: PackedInt32Array = []
 var _is_connected: bool = false
+var _is_server: bool = false  # Will be true if this peer is the host
 
 func _init() -> void:
 	ws = WebSocketPeer.new()
@@ -106,7 +109,19 @@ func _handle_room_joined(data: Dictionary) -> void:
 			_connected_peers.append(p as int)
 		elif typeof(p) == TYPE_FLOAT:
 			_connected_peers.append(int(p as float))
+
+	# Peer 1 is always the host in the Node backend
+	_is_server = (_peer_id == 1)
+
 	print("[NodeAdapter] ✅ Room joined: ", _room_id, " (peer ", _peer_id, ")")
+	print("[NodeAdapter] 👥 Connected peers: ", _connected_peers)
+	print("[NodeAdapter] 🎮 Is server: ", _is_server)
+
+	# Emit peer_connected signal for each connected peer (for Godot's multiplayer system)
+	for peer_id in _connected_peers:
+		print("[NodeAdapter] 📡 Emitting peer_connected signal for peer: ", peer_id)
+		peer_connected.emit(peer_id)
+
 	room_joined.emit(_peer_id, _room_id)
 
 func _handle_state(data: Dictionary) -> void:
@@ -115,6 +130,7 @@ func _handle_state(data: Dictionary) -> void:
 		"room_created":
 			_room_id = data.get("roomId", "")
 			_peer_id = 1  # Host is always peer 1
+			_is_server = true
 			room_created.emit(_room_id)
 			UIHandler.show_alert("Room created: " + _room_id, 6, false, UIHandler.alert_colour_player)
 		"room_joined":
@@ -127,15 +143,25 @@ func _handle_state(data: Dictionary) -> void:
 					_connected_peers.append(p as int)
 				elif typeof(p) == TYPE_FLOAT:
 					_connected_peers.append(int(p as float))
+			_is_server = (_peer_id == 1)
+
+			# Emit peer_connected signal for each connected peer
+			for peer_id in _connected_peers:
+				peer_connected.emit(peer_id)
+
 			room_joined.emit(_peer_id, _room_id)
 		"peer_joined":
 			var peer_id: int = data.get("peerId", 0)
 			if peer_id > 0 and not _connected_peers.has(peer_id):
 				_connected_peers.append(peer_id)
+				print("[NodeAdapter] 👤 Peer joined: ", peer_id)
+				peer_connected.emit(peer_id)
 		"peer_left":
 			var peer_id: int = data.get("peerId", 0)
 			if _connected_peers.has(peer_id):
 				_connected_peers.erase(peer_id)
+				print("[NodeAdapter] 👤 Peer left: ", peer_id)
+				peer_disconnected.emit(peer_id)
 
 func _handle_rpc(data: Dictionary) -> void:
 	var method_name: String = data.get("method", "")
@@ -178,13 +204,20 @@ func _handle_rooms_changed() -> void:
 
 # Send message to backend
 func _send_message(msg_type: String, msg_data: Dictionary) -> void:
+	print("[NodeAdapter] 📡 _send_message() called: type='", msg_type, "'")
+	print("[NodeAdapter]   - WebSocket: ", ws)
+	print("[NodeAdapter]   - WebSocket state: ", ws.get_ready_state() if ws else "NULL")
+
 	if ws == null or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		print("[NodeAdapter] ❌ ERROR: Cannot send message - WebSocket not open!")
 		push_error("Cannot send message: WebSocket not open")
 		return
 
 	var message: Dictionary = {"type": msg_type, "data": msg_data}
 	var json_str: String = JSON.stringify(message)
+	print("[NodeAdapter] 📨 Message JSON: ", json_str)
 	ws.send_text(json_str)
+	print("[NodeAdapter] ✅ Message sent successfully")
 
 # Protocol methods
 func send_handshake(version: String, player_name: String, token: String = "") -> void:
@@ -210,11 +243,25 @@ func create_room(version: String, player_name: String, gamemode: String = "death
 	print("[NodeAdapter] 📤 Sent create_room request")
 
 func join_room(room_id: String, version: String, player_name: String) -> void:
-	_send_message("join_room", {
+	print("[NodeAdapter] 🔍 DEBUG: join_room() called")
+	print("[NodeAdapter]   - room_id: ", room_id)
+	print("[NodeAdapter]   - version: ", version)
+	print("[NodeAdapter]   - player_name: ", player_name)
+	print("[NodeAdapter]   - WebSocket state: ", ws.get_ready_state() if ws else "NULL")
+	print("[NodeAdapter]   - _is_connected: ", _is_connected)
+
+	if not ws or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		print("[NodeAdapter] ❌ ERROR: WebSocket not connected! Cannot send join_room")
+		return
+
+	var payload: Dictionary = {
 		"roomId": room_id,
 		"version": version,
-		"playerName": player_name
-	})
+		"name": player_name
+	}
+	print("[NodeAdapter] 📤 Sending join_room with payload: ", payload)
+	_send_message("join_room", payload)
+	print("[NodeAdapter] ✅ join_room message sent")
 
 func send_chat(text: String) -> void:
 	_send_message("chat", {"text": text})
@@ -251,3 +298,28 @@ func get_room_id() -> String:
 
 func is_backend_connected() -> bool:
 	return _is_connected and ws != null and ws.get_ready_state() == WebSocketPeer.STATE_OPEN
+
+# Query methods for multiplayer integration
+func get_unique_peer_id() -> int:
+	"""Return the ID of this local peer"""
+	return _peer_id
+
+func is_server() -> bool:
+	"""Return true if this peer is the server/host"""
+	return _is_server
+
+func get_connected_peers() -> PackedInt32Array:
+	"""Return array of connected peer IDs (excluding self)"""
+	return _connected_peers.duplicate()
+
+func is_peer_connected(peer: int) -> bool:
+	"""Check if a specific peer is connected"""
+	if peer == _peer_id:
+		return true  # Local peer is always connected to itself
+	return _connected_peers.has(peer)
+
+# Helper method to update server status when we join a room
+func _set_is_server(is_server: bool) -> void:
+	"""Internal method to set whether this peer is the host/server"""
+	_is_server = is_server
+	print("[NodeAdapter] 🎮 Server status changed: is_server=", _is_server)

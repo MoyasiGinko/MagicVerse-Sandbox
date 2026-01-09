@@ -150,19 +150,36 @@ func _on_worlds_response(result: int, response_code: int, headers: PackedStringA
 	print("[RoomCreation] ✅ Loaded ", available_maps.size(), " maps from API")
 
 func _populate_fallback_maps() -> void:
-	"""Populate with hardcoded fallback maps"""
-	const FALLBACK_MAPS: Array[String] = ["Default", "Arena", "Fortress", "Plaza"]
-
+	"""Populate with built-in and user-saved maps"""
 	map_dropdown.clear()
 	map_dropdown.disabled = false
 	available_maps.clear()
 
-	for map_name: String in FALLBACK_MAPS:
-		map_dropdown.add_item(map_name)
-		available_maps.append({"name": map_name})
+	# Get built-in maps from res://data/tbw/
+	var builtin_maps: Array = Global.get_internal_tbw_names()
+	print("[RoomCreation] 📦 Found ", builtin_maps.size(), " built-in maps")
 
-	map_dropdown.select(0)
-	print("[RoomCreation] ✅ Loaded ", FALLBACK_MAPS.size(), " fallback maps")
+	# Add built-in maps (without .tbw extension)
+	for map_file: String in builtin_maps:
+		if map_file.ends_with(".tbw") and map_file != "editor_default.tbw" and map_file != "tutorial.tbw":
+			var map_name: String = map_file.replace(".tbw", "")
+			map_dropdown.add_item(map_name)
+			available_maps.append({"name": map_name, "type": "builtin"})
+
+	# Get user-saved maps from user://world/
+	var user_maps: Array = Global.get_user_tbw_names()
+	print("[RoomCreation] 💾 Found ", user_maps.size(), " user maps")
+
+	# Add user maps (already without extension from get_user_tbw_names)
+	for map_file: String in user_maps:
+		var map_name: String = map_file.replace(".tbw", "")
+		map_dropdown.add_item(map_name + " (My Maps)")
+		available_maps.append({"name": map_name, "type": "user"})
+
+	if map_dropdown.item_count > 0:
+		map_dropdown.select(0)
+
+	print("[RoomCreation] ✅ Loaded ", available_maps.size(), " total maps")
 func show_dialog() -> void:
 	"""Show the room creation dialog"""
 	print("[RoomCreation] Showing dialog...")

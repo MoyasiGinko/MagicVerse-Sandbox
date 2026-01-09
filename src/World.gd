@@ -28,6 +28,52 @@ var tbw_loading : bool = false
 
 var last_tbw_load_time : int = 0
 
+# Helper function to call methods safely whether using RPC or direct calls
+func _call_or_rpc(method_name: String, args: Array = []) -> void:
+	"""Call a method either via RPC (ENet) or directly (Node backend)"""
+	if multiplayer.multiplayer_peer != null:
+		# Using ENet - use RPC
+		match method_name:
+			"set_loading_canvas_visiblity":
+				set_loading_canvas_visiblity.rpc(args[0] as bool if args.size() > 0 else true)
+			"set_loading_canvas_text":
+				set_loading_canvas_text.rpc(args[0] as String if args.size() > 0 else "")
+			"reset_player_cameras":
+				reset_player_cameras.rpc()
+			"reset_player_positions":
+				reset_player_positions.rpc()
+			"set_songs":
+				get_current_map().set_songs.rpc(args[0] as String if args.size() > 0 else "")
+			"set_respawn_time":
+				get_current_map().set_respawn_time.rpc(args[0] as float if args.size() > 0 else 0.0)
+			"set_gravity_scale":
+				get_current_map().set_gravity_scale.rpc(args[0] as float if args.size() > 0 else 1.0)
+			"set_gravity":
+				get_current_map().set_gravity.rpc(args[0] as bool if args.size() > 0 else false)
+			"sync_tbw_obj_properties":
+				pass  # Complex RPC, skip for now
+	else:
+		# Node backend - call directly
+		match method_name:
+			"set_loading_canvas_visiblity":
+				set_loading_canvas_visiblity(args[0] as bool if args.size() > 0 else true)
+			"set_loading_canvas_text":
+				set_loading_canvas_text(args[0] as String if args.size() > 0 else "")
+			"reset_player_cameras":
+				reset_player_cameras()
+			"reset_player_positions":
+				reset_player_positions()
+			"set_songs":
+				get_current_map().set_songs(args[0] as String if args.size() > 0 else "")
+			"set_respawn_time":
+				get_current_map().set_respawn_time(args[0] as float if args.size() > 0 else 0.0)
+			"set_gravity_scale":
+				get_current_map().set_gravity_scale(args[0] as float if args.size() > 0 else 1.0)
+			"set_gravity":
+				get_current_map().set_gravity(args[0] as bool if args.size() > 0 else false)
+			"sync_tbw_obj_properties":
+				pass  # Complex RPC, skip for now
+
 func get_spawnpoint_for_team(team_name : String) -> Array[Vector3]:
 	var spawns : Array[Vector3] = []
 	for obj in get_children():
@@ -48,7 +94,7 @@ func change_player_team(who : RigidPlayer, what_team : Team) -> void:
 func add_player_to_list(player : RigidPlayer) -> void:
 	if !rigidplayer_list.has(player):
 		rigidplayer_list.append(player)
-	
+
 func remove_player_from_list(player : RigidPlayer) -> void:
 	if rigidplayer_list.has(player):
 		rigidplayer_list.erase(player)
@@ -64,9 +110,9 @@ func _ready() -> void:
 
 func _on_peer_connected(id : int) -> void:
 	if !multiplayer.is_server(): return
-	
+
 	print("peer connected on world: ", str(id))
-	
+
 	# sync tbw objects
 	for obj : Node in get_children():
 		if obj is TBWObject:
@@ -102,22 +148,22 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 	if tbw_loading:
 		UIHandler.show_alert("Please wait for the world to load before saving it!", 5, false, UIHandler.alert_colour_error)
 		return false
-	
+
 	# check if there is a given selection
 	var saving_entire_world : bool = false
 	if selection.is_empty():
 		saving_entire_world = true
 		selection = get_children()
-	
+
 	if !temp && world_name == "temp":
 		UIHandler.show_alert("That name is reserved for internal use! Please pick another.", 5, false, UIHandler.alert_colour_error)
-	
+
 	for map : String in Global.get_internal_tbw_names():
 		var internal_name : String = map.split(".")[0]
 		if internal_name == world_name:
 			UIHandler.show_alert(str("That world name (", world_name, ") is\nalready used by a built-in map! Please pick another."), 5, false, UIHandler.alert_colour_error)
 			return false
-	
+
 	var dir : DirAccess = DirAccess.open("user://world")
 	if saving_entire_world:
 		if !dir:
@@ -130,7 +176,7 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 			DirAccess.make_dir_absolute("user://building")
 		# save building to file
 		dir = DirAccess.open("user://building")
-	
+
 	if server:
 		dir = DirAccess.open(UserPreferences.os_path)
 	var count : int = 0
@@ -144,7 +190,7 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 	else:
 		print("An error occurred when trying to access the path.")
 	var save_name : String = str(world_name)
-	
+
 	var img : Image = null
 	# get frame image and save it as raw->base64 on first line
 	# hide everything
@@ -177,7 +223,7 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 			get_tree().current_scene.get_node("/root/PersistentScene/AlertCanvas").visible = true
 	if !temp:
 		UIHandler.show_alert(str("Saved as ", save_name, ".tbw."), 4, false, UIHandler.alert_colour_gold)
-	
+
 	# Create tbw file.
 	var file : FileAccess
 	if server:
@@ -197,7 +243,7 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 	# servers don't save images
 	if !server:
 		file.store_line(str("image ; ", Marshalls.raw_to_base64(img.save_jpg_to_buffer())))
-	
+
 	if saving_entire_world:
 		# Save song list (if not using all songs)
 		if get_current_map().songs.size() != MusicHandler.ALL_SONGS_LIST.size():
@@ -230,7 +276,7 @@ func save_tbw(world_name : String, server : bool = false, selection : Array = []
 			elif obj is TBWEnvironment:
 				file.store_line(str("Environment ; ", obj.environment_name))
 	# Store bricks in the same format as buildings.
-	
+
 	# Make sure there is actually a brick to save
 	var found_brick := false
 	for b : Node in selection:
@@ -320,11 +366,31 @@ func set_loading_canvas_text(text : String) -> void:
 
 
 func open_tbw(lines : Array, reset_camera_and_player : bool = true) -> void:
-	if !multiplayer.is_server(): return
+	# Allow world loading for:
+	# 1. ENet servers (traditional multiplayer)
+	# 2. Single-player mode or Node backend (multiplayer.multiplayer_peer == null)
+	# Note: Node backend doesn't use Godot's multiplayer system; it uses MultiplayerNodeAdapter directly
+
+	print("[World] 🔍 DEBUG open_tbw called:")
+	print("[World]   - Lines count: ", lines.size())
+	print("[World]   - is_server(): ", multiplayer.is_server())
+	print("[World]   - multiplayer_peer: ", multiplayer.multiplayer_peer)
+	print("[World]   - multiplayer_peer == null: ", multiplayer.multiplayer_peer == null)
+
+	var can_load_world: bool = multiplayer.is_server() or multiplayer.multiplayer_peer == null
+
+	print("[World]   - can_load_world: ", can_load_world)
+
+	if !can_load_world:
+		print("[World] ⚠️ Skipping world load: not server and not using compatible backend")
+		return
+
+	print("[World] ✅ Proceeding with world load")
+
 	# End the active gamemode if a new world is requested.
 	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])
 	e.start()
-	
+
 	for p : RigidPlayer in rigidplayer_list:
 		p.protect_spawn(3.5, false)
 	await get_tree().physics_frame
@@ -332,42 +398,56 @@ func open_tbw(lines : Array, reset_camera_and_player : bool = true) -> void:
 	clear_world()
 	# Load default empty map, unless we are in the editor
 	if !(Global.get_world().get_current_map() is Editor):
+		print("[World] 📦 Loading base world scene...")
 		load_map(load(str("res://data/scene/BaseWorld/BaseWorld.tscn")) as PackedScene)
-	
+		print("[World] ✅ Base world loaded")
+
 	# set fallback values
+	print("[World] 🔧 Resetting map properties...")
 	Global.get_world().get_current_map().reset_map_properties()
-	
+
 	# BIG file, show loading visual
 	if lines.size() > 100:
-		set_loading_canvas_visiblity.rpc(true)
-	
+		print("[World] 💾 Large file detected, showing loading canvas...")
+		_call_or_rpc("set_loading_canvas_visiblity", [true])
+
+	print("[World] 📝 Parsing TBW file...")
 	var contained_world := await parse_tbw(lines)
-	
+	print("[World] ✅ TBW file parsed")
+
 	# reset all player cameras once world is done loading
 	if reset_camera_and_player:
-		reset_player_cameras.rpc()
-		reset_player_positions.rpc()
+		print("[World] 🎥 Resetting cameras and positions...")
+		_call_or_rpc("reset_player_cameras", [])
+		_call_or_rpc("reset_player_positions", [])
 	# add basic gamemodes
+	print("[World] 🎮 Adding gamemodes...")
 	_clear_gamemodes()
 	add_all_gamemodes()
 	print(gamemode_list)
 	# announce we are done loading
+	print("[World] 🏁 World loading complete!")
 	tbw_loading = false
 	await get_tree().process_frame
+	print("[World] 📢 Emitting tbw_loaded signal...")
 	emit_signal("tbw_loaded")
+	print("[World] 📢 Emitting map_loaded signal...")
+	emit_signal("map_loaded")  # Emit this at the end so callers know everything is loaded
+	print("[World] ✅✅ ALL SIGNALS EMITTED - WORLD READY!")
 
 
 # Only to be run as server or local client
 func parse_tbw(lines : Array, return_as_container : bool = false) -> Node3D:
+	print("[World:parse_tbw] 🔍 Starting TBW parsing, return_as_container=", return_as_container)
 	var container := Node3D.new()
 	if return_as_container:
 		add_child(container)
-	
+
 	var count : int = 0
 	# amount of lines to read in a frame
 	var max_proc := 32
 	var cur_proc := 0
-	
+
 	# run through each line
 	for line : String in lines:
 		cur_proc += 1
@@ -376,12 +456,12 @@ func parse_tbw(lines : Array, return_as_container : bool = false) -> Node3D:
 			await get_tree().process_frame
 			cur_proc = 0
 			if loading_canvas.visible:
-				set_loading_canvas_text.rpc(str("Loading .tbw file...     Objects: ", count))
+				_call_or_rpc("set_loading_canvas_text", [str("Loading .tbw file...     Objects: ", count)])
 		if line != "":
 			if !return_as_container:
 				# songs
 				if str(line).begins_with("songs ;"):
-					get_current_map().set_songs.rpc(line)
+					_call_or_rpc("set_songs", [line])
 				if str(line).begins_with("death_limit_low ; "):
 					get_current_map().death_limit_low = str(line).split(" ; ")[1] as int
 				if str(line).begins_with("death_limit_high ; "):
@@ -389,22 +469,26 @@ func parse_tbw(lines : Array, return_as_container : bool = false) -> Node3D:
 				if str(line).begins_with("respawn_time ; "):
 					var respawn_time : int = str(line).split(" ; ")[1] as int
 					get_current_map().respawn_time = respawn_time
-					get_current_map().set_respawn_time.rpc(respawn_time)
+					_call_or_rpc("set_respawn_time", [respawn_time])
 				if str(line).begins_with("gravity_scale ; "):
 					var gravity_scale : float = str(line).split(" ; ")[1] as float
 					# Modify default gravity
-					get_current_map().set_gravity_scale.rpc(gravity_scale)
-					get_current_map().set_gravity.rpc(false)
+					_call_or_rpc("set_gravity_scale", [gravity_scale])
+					_call_or_rpc("set_gravity", [false])
 			# final step, place building
 			if str(line) == "[building]":
+				print("[World:parse_tbw] 🏢 Found [building] section at line ", count)
 				# disable loading canvas if we used it
-				set_loading_canvas_visiblity.rpc(false)
+				_call_or_rpc("set_loading_canvas_visiblity", [false])
 				# load building portion, use global pos
 				# pass container if returning as container
 				if return_as_container:
+					print("[World:parse_tbw] 📦 Loading building as container...")
 					await _server_load_building(lines.slice(count+1), Vector3.ZERO, false, container)
 				else:
+					print("[World:parse_tbw] 🧱 Loading building normally...")
 					await _server_load_building(lines.slice(count+1), Vector3.ZERO, true)
+				print("[World:parse_tbw] ✅ Building loaded!")
 				break
 			# Load other world elements, like environment, objects, etc.
 			elif !return_as_container:
@@ -447,7 +531,8 @@ func parse_tbw(lines : Array, return_as_container : bool = false) -> Node3D:
 								var property : Variant = Global.property_string_to_property(property_name, property_split[1])
 								# set the property
 								inst.set_property(property_name, property)
-						sync_tbw_obj_properties.rpc(inst.get_path(), inst.properties_as_dict())
+						if multiplayer.multiplayer_peer != null:
+							sync_tbw_obj_properties.rpc(inst.get_path(), inst.properties_as_dict())
 		count += 1
 	return container
 
@@ -457,7 +542,7 @@ func add_all_gamemodes() -> void:
 	add_gamemode(GamemodeDeathmatch.new(true))
 	add_gamemode(GamemodeHomeRun.new(true))
 	add_gamemode(GamemodeBalls.new(true))
-	
+
 	var has_capture_point : bool = false
 	# check capture ffa
 	for obj in get_children():
@@ -465,7 +550,7 @@ func add_all_gamemodes() -> void:
 			add_gamemode(GamemodeKOTH.new(true))
 			has_capture_point = true
 			break
-	
+
 	var has_finish_line : bool = false
 	# check finishline
 	for obj in get_children():
@@ -474,7 +559,7 @@ func add_all_gamemodes() -> void:
 				add_gamemode(GamemodeRace.new(true))
 				has_finish_line = true
 				break
-	
+
 	# check tdm spawns
 	var first_team_spawn_name := ""
 	for obj in get_children():
@@ -573,7 +658,7 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 		count_start += 1
 		if str(line) == "[building]":
 			lines = lines.slice(count_start)
-	
+
 	var building_group := []
 	building_group.resize(lines.size())
 	var line_split_init : PackedStringArray = lines[0].split(" ; ")
@@ -610,11 +695,11 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 							lowest_pos = this_pos
 		var building_pos : Vector3 = Global.property_string_to_property("global_position", line_split_init[1].split(":")[1])
 		offset_pos = Vector3(roundf(building_pos.x), roundf(lowest_pos.y), roundf(building_pos.z))
-	
+
 	# BIG file, show loading visual
 	if lines.size() > 100:
-		set_loading_canvas_visiblity.rpc(true)
-	
+		_call_or_rpc("set_loading_canvas_visiblity", [true])
+
 	### Reading file
 	# amount of lines to read in a frame
 	var max_proc := 32
@@ -630,7 +715,7 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 			await get_tree().process_frame
 			cur_proc = 0
 			if loading_canvas.visible:
-				set_loading_canvas_text.rpc(str("Loading file...     Bricks: ", total_proc))
+				_call_or_rpc("set_loading_canvas_text", [str("Loading file...     Bricks: ", total_proc)])
 		if line != "":
 			var line_split := line.split(" ; ")
 			if SpawnableObjects.objects.has(line_split[0]):
@@ -657,7 +742,7 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 						# set the property
 						b.set_property(property_name, property)
 	building_group.resize(bg_actual_size)
-	
+
 	# placing directly in world
 	if container == null:
 		if placement_rotation != Vector3.ZERO:
@@ -683,7 +768,7 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 				var local_trans := pivot.affine_inverse() * b.global_transform
 				b.global_transform = new_pivot * local_trans
 			pivot_obj.queue_free()
-		
+
 		### Joining bricks
 		# don't place nothing
 		if building_group.size() < 1:
@@ -712,23 +797,35 @@ func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_
 		# 2. check neighbours
 		var count : int = 0
 		for b : Brick in building_group:
-			b.change_state.rpc(Brick.States.PLACED)
+			if multiplayer.multiplayer_peer != null:
+				b.change_state.rpc(Brick.States.PLACED)
+			else:
+				b.change_state(Brick.States.PLACED)
 			if count == 1:
 				# recheck first brick in array on second brick check
 				# (never gets chance to join)
 				building_group[0].check_joints()
 			count += 1
-			b.sync_properties.rpc(b.properties_as_dict())
+			if multiplayer.multiplayer_peer != null:
+				b.sync_properties.rpc(b.properties_as_dict())
+			else:
+				b.sync_properties(b.properties_as_dict())
 		# now for each extra brick:
 		# 1. enable its collider
 		# 2. check neighbours
 		await get_tree().process_frame
 		count = 0
 		for b : Brick in building_group_extras:
-			b.change_state.rpc(Brick.States.PLACED)
+			if multiplayer.multiplayer_peer != null:
+				b.change_state.rpc(Brick.States.PLACED)
+			else:
+				b.change_state(Brick.States.PLACED)
 			count += 1
-			b.sync_properties.rpc(b.properties_as_dict())
-		
+			if multiplayer.multiplayer_peer != null:
+				b.sync_properties.rpc(b.properties_as_dict())
+			else:
+				b.sync_properties(b.properties_as_dict())
+
 		print(str("Done loading building, checking groups. ", Time.get_ticks_msec()))
 		# Update the brick groups.
 		get_node("BrickGroups").check_world_groups(true)

@@ -94,6 +94,10 @@ function cleanupClient(ws: WebSocket) {
   if (roomId && peerId !== null) {
     const room = roomManager.getRoom(roomId);
     if (room) {
+      // Check if leaving player was the host
+      const leavingMember = room.clients.get(peerId);
+      const wasHost = leavingMember?.isHost || false;
+
       roomManager.leaveRoom(roomId, peerId);
 
       // Remove player from session (decrements player count)
@@ -102,6 +106,21 @@ function cleanupClient(ws: WebSocket) {
         console.log(
           `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`
         );
+      }
+
+      // If the host left and there are still players, promote the next player
+      const remainingMembers = roomManager.getRoomMembers(roomId);
+      if (wasHost && remainingMembers.length > 0) {
+        // Promote first remaining member to host
+        remainingMembers[0].isHost = true;
+        console.log(
+          `[WebSocket] 👑 Player ${remainingMembers[0].name} promoted to host (previous host left)`
+        );
+        // Notify all players about the new host
+        broadcast(room, "host_changed", {
+          newHostPeerId: remainingMembers[0].peerId,
+          newHostName: remainingMembers[0].name,
+        });
       }
 
       broadcast(room, "peer_left", { peerId }, peerId);
@@ -287,14 +306,43 @@ export function setupWebSocket(server: http.Server) {
           session.roomId = roomId;
 
           // Add player to room session (enforces single-room, increments player count)
-          roomRepo.addPlayerSession(session.userId!, roomId);
+          const sessionAdded = roomRepo.addPlayerSession(
+            session.userId!,
+            roomId
+          );
+          if (!sessionAdded) {
+            console.log(
+              `[WebSocket] ⚠️  Player ${session.userId} already in room ${roomId}, sending existing session info`
+            );
+            // Player already in room - just send them the room_joined confirmation again
+            const members = roomManager.getRoomMembers(roomId);
+            return send(ws, "room_joined", {
+              roomId: roomId,
+              peerId,
+              members: members.map((c) => ({
+                peerId: c.peerId,
+                name: c.name,
+                isHost: c.isHost,
+              })),
+              currentTbw: updatedRoom.currentTbw,
+            });
+          }
           console.log(
             `[WebSocket] 🎮 Player ${session.userId} joined room ${roomId}`
           );
 
-          // Update player count in database
+          // Check if room was empty and promote this player to host
           const memberCount = roomManager.getRoomMembers(roomId).length;
-          roomRepo.updatePlayerCount(roomId, memberCount);
+          if (memberCount === 1) {
+            // This is the first player joining - make them the host
+            const updatedMember = roomManager.getRoomMembers(roomId)[0];
+            updatedMember.isHost = true;
+            console.log(
+              `[WebSocket] 👑 Player ${session.userId} promoted to host (first member in empty room)`
+            );
+          }
+
+          // Player count already updated by addPlayerSession, no need to update again
 
           const members = roomManager.getRoomMembers(roomId);
           send(ws, "room_joined", {

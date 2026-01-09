@@ -836,24 +836,42 @@ func _setup_node_backend_host() -> void:
 	get_tree().current_scene.get_node("GameCanvas").visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
-func _setup_node_backend_client(room_code: String = "") -> void:
+func _setup_node_backend_client(room_code: String = "", map_name: String = "", gamemode: String = "") -> void:
 	print("[Main] === SETTING UP NODE BACKEND AS CLIENT ===")
 	print("[Main] Room code: ", room_code)
+	print("[Main] Map name: ", map_name)
+	print("[Main] Gamemode: ", gamemode)
+	print("[Main] Server URL: ", node_server_url)
+	print("[Main] Player name: ", Global.display_name)
+	print("[Main] Auth token: ", Global.auth_token.substr(0, 20) if Global.auth_token.length() > 20 else "SHORT_TOKEN")
+
+	# Check if adapter already exists and clean it up
+	if node_peer != null and is_instance_valid(node_peer):
+		print("[Main] ⚠️  Existing adapter found, cleaning up...")
+		node_peer.close()
+		node_peer.queue_free()
+		node_peer = null
+		print("[Main] ✅ Old adapter cleaned up")
+
 	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
 	if global_join_button:
 		global_join_button.text = "Connecting..."
 		global_join_button.disabled = true
 
 	# Create Node adapter
+	print("[Main] 🔨 Creating MultiplayerNodeAdapter...")
 	node_peer = MultiplayerNodeAdapter.new()
 	add_child(node_peer)
+	print("[Main] ✅ MultiplayerNodeAdapter created and added")
 
 	# Connect adapter signals
+	print("[Main] 🔗 Connecting adapter signals...")
 	node_peer.room_joined.connect(_on_room_joined)
 	node_peer.connection_failed.connect(_on_connection_failed)
+	print("[Main] ✅ Signals connected")
 
 	# Connect to Node backend
-	print("[Main] 🔄 Connecting to Node backend...")
+	print("[Main] 🔄 Connecting to Node backend at ", node_server_url, "...")
 	if not node_peer.connect_to_server(node_server_url):
 		print("[Main] ❌ Failed to connect to Node backend")
 		join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
@@ -864,29 +882,71 @@ func _setup_node_backend_client(room_code: String = "") -> void:
 		return
 
 	# Wait for WebSocket connection to open
+	print("[Main] ⏳ Waiting 0.5s for WebSocket connection to establish...")
 	await get_tree().create_timer(0.5).timeout
+	print("[Main] ✅ Waited, continuing...")
 
 	# Send handshake with authentication
-	print("[Main] 🤝 Sending handshake...")
+	print("[Main] 🤝 Sending handshake with token...")
 	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
+	print("[Main] ✅ Handshake sent")
 
 	# Wait for handshake to be processed
+	print("[Main] ⏳ Waiting 0.3s for handshake processing...")
 	await get_tree().create_timer(0.3).timeout
+	print("[Main] ✅ Waited, continuing...")
 
 	# Send join_room
 	if room_code.is_empty():
 		room_code = join_address.text
-	print("[Main] 📤 Sending join_room for: ", room_code)
+	print("[Main] 📤 SENDING JOIN_ROOM:")
+	print("[Main]   - Room code: ", room_code)
+	print("[Main]   - Version: ", str(server_version))
+	print("[Main]   - Player: ", Global.display_name)
 	node_peer.join_room(room_code, str(server_version), Global.display_name)
+	print("[Main] ✅ join_room message sent")
+
+	# Wait for room_joined signal before loading world
+	print("[Main] ⏳ Waiting for server to confirm room join...")
+	await node_peer.room_joined
+	print("[Main] ✅ Room join confirmed by server!")
+
+	# Note: We don't set multiplayer.multiplayer_peer because MultiplayerPeer is abstract
+	# Instead, we use the node_peer adapter directly for RPC-like calls and peer management
+	print("[Main] 🌐 Adapter ready for multiplayer communication")
+	print("[Main] ✅ Local peer_id=", node_peer.get_unique_peer_id())
+	print("[Main] 🎮 Is host: ", node_peer.is_server())
 
 	# Load world
+	print("[Main] 🌍 Loading world/map...")
 	$World.delete_old_map()
-	await Signal($World, "map_loaded")
+	print("[Main] ✅ Old map deleted")
+
+	# Load the selected map (or default if not specified)
+	var map_to_load: String = map_name if map_name != "" else "Frozen Field"
+	print("[Main] 🗺️  Loading map: ", map_to_load)
+
+	# For Node backend, load the world directly (not through multiplayer RPC)
+	var lines: Array = Global.get_tbw_lines(map_to_load, false)
+	if lines.size() > 0:
+		print("[Main] 📂 Loaded ", lines.size(), " lines from ", map_to_load, ".tbw")
+		# Call open_tbw directly to parse and load the world
+		# This bypasses the multiplayer RPC system used in ENet
+		$World.open_tbw(lines)
+		print("[Main] ⏳ Waiting for map to fully load...")
+		await Signal($World, "map_loaded")
+		print("[Main] ✅ Map loaded: ", map_to_load)
+	else:
+		print("[Main] ❌ Failed to load map: ", map_to_load, " (file not found)")
+		UIHandler.show_alert("Failed to load map: " + map_to_load, 6, false, UIHandler.alert_colour_error)
+		return
 
 	# add camera
+	print("[Main] 📷 Adding camera...")
 	var camera_inst : Node3D = CAMERA.instantiate()
 	$World.add_child(camera_inst, true)
 	camera_inst.global_position = Vector3(70, 190, 0)
+	print("[Main] ✅ Camera added")
 
 	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
 	get_tree().current_scene.get_node("GameCanvas").visible = true

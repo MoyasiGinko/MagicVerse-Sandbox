@@ -17,7 +17,7 @@
 extends PanelContainer
 class_name GlobalServerList
 
-signal room_selected(room_id: String)
+signal room_selected(room_id: String, room_data: Dictionary)
 
 var scroll_container: ScrollContainer
 var list_container: VBoxContainer
@@ -262,7 +262,7 @@ func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	print("[ServerList] 📥 Room details: Gamemode=", gamemode, " Map=", map, " Host=", host)
 	print("[ServerList] 👥 Players: ", current_players, "/", max_players)
 	print("[ServerList] 📤 Emitting room_selected signal with ID: ", room_id)
-	room_selected.emit(room_id)
+	room_selected.emit(room_id, room)
 	print("[ServerList] ✅ room_selected signal emitted successfully")
 
 func get_room_by_id(room_id: String) -> Dictionary:

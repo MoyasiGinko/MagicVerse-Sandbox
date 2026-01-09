@@ -77,9 +77,8 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       "[RoomAPI] ✅ Room created successfully (current_players=0, awaiting WebSocket join)"
     );
 
-    // Add host to player_sessions so they can join via WebSocket
-    console.log("[RoomAPI] 👑 Adding host to player_sessions...");
-    roomRepo.addPlayerSession(userId, roomId);
+    // Don't add host to player_sessions here - they'll be added when they
+    // actually join via WebSocket. This keeps the count accurate.
 
     // Notify all connected clients that room list has changed
     console.log("[RoomAPI] 📢 Broadcasting room creation to all clients...");
@@ -99,8 +98,14 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    console.error("[RoomAPI] ❌ ERROR creating room:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("[RoomAPI] ❌ ERROR creating room - Full Error:", error);
+    if (error instanceof Error) {
+      console.error("[RoomAPI] ❌ Error message:", error.message);
+      console.error("[RoomAPI] ❌ Error stack:", error.stack);
+    }
+    res
+      .status(500)
+      .json({ error: "Internal server error", details: String(error) });
   }
 });
 
@@ -109,15 +114,7 @@ router.get("/", async (req: Request, res: Response) => {
   try {
     const { gamemode } = req.query;
 
-    console.log("[RoomAPI] 📥 GET ROOMS REQUEST - Fetching active rooms");
-    if (gamemode) {
-      console.log("[RoomAPI] 🔍 Filtering by gamemode: ", gamemode);
-    } else {
-      console.log("[RoomAPI] 🔍 No gamemode filter, getting all rooms");
-    }
-
     const rooms = roomRepo.getAllActiveRooms(gamemode as string | undefined);
-    console.log("[RoomAPI] ✅ Found ", rooms.length, " active rooms");
 
     // Transform to include calculated fields
     const roomList = rooms.map((room) => ({
@@ -130,8 +127,6 @@ router.get("/", async (req: Request, res: Response) => {
       created_at: room.created_at,
       is_full: room.current_players >= room.max_players,
     }));
-
-    console.log("[RoomAPI] 📤 Sending ", roomList.length, " rooms to client");
     res.json({
       count: roomList.length,
       rooms: roomList,
@@ -146,23 +141,12 @@ router.get("/", async (req: Request, res: Response) => {
 router.get("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    console.log("[RoomAPI] 📥 GET ROOM DETAILS - Room ID: ", id);
-
     const room = roomRepo.getRoomById(id);
 
     if (!room) {
-      console.log("[RoomAPI] ❌ Room not found: ", id);
       res.status(404).json({ error: "Room not found" });
       return;
     }
-
-    console.log(
-      "[RoomAPI] ✅ Found room: ",
-      id,
-      " - Host: ",
-      room.host_username
-    );
-    console.log("[RoomAPI] 📤 Sending room details to client");
     res.json(room);
   } catch (error) {
     console.error("[RoomAPI] ❌ ERROR fetching room:", error);
