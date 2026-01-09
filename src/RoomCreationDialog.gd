@@ -30,15 +30,9 @@ const GAMEMODES: Array[String] = [
 	"1v1"
 ]
 
-# Available maps
-const MAPS: Array[String] = [
-	"Default",
-	"Arena",
-	"Fortress",
-	"Plaza"
-]
-
+var available_maps: Array = []
 var is_creating: bool = false
+var is_loading_maps: bool = false
 @export var backend_path: NodePath = NodePath("../GlobalPlayMenu/Backend")
 var backend: GlobalPlayMenuBackend
 
@@ -50,6 +44,9 @@ var backend: GlobalPlayMenuBackend
 @onready var cancel_button: Button = $VBoxContainer/ButtonContainer/CancelButton
 @onready var status_label: Label = $VBoxContainer/StatusLabel
 
+# HTTP request for fetching worlds
+var _http_worlds: HTTPRequest
+
 func _ready() -> void:
 	print("[RoomCreation] Dialog initializing...")
 	# Resolve backend via exported path
@@ -59,17 +56,21 @@ func _ready() -> void:
 		backend.room_created.connect(_on_backend_room_created)
 		print("[RoomCreation] Backend room_created signal connected")
 
+	# Setup HTTP request for worlds
+	_http_worlds = HTTPRequest.new()
+	add_child(_http_worlds)
+	_http_worlds.request_completed.connect(_on_worlds_response)
+
 	# Setup gamemode dropdown
 	for gamemode: String in GAMEMODES:
 		gamemode_dropdown.add_item(gamemode)
 	gamemode_dropdown.select(0)
 	print("[RoomCreation] Gamemode dropdown populated with ", GAMEMODES.size(), " options")
 
-	# Setup map dropdown
-	for map_name: String in MAPS:
-		map_dropdown.add_item(map_name)
-	map_dropdown.select(0)
-	print("[RoomCreation] Map dropdown populated with ", MAPS.size(), " options")
+	# Map dropdown will be populated when dialog shows
+	map_dropdown.add_item("Loading maps...")
+	map_dropdown.disabled = true
+	print("[RoomCreation] Map dropdown will load from API")
 
 	# Setup max players spinner
 	max_players_spin.min_value = 2
@@ -91,6 +92,77 @@ func _ready() -> void:
 	visible = false
 	status_label.text = ""
 	print("[RoomCreation] Dialog initialization complete!")
+
+func fetch_available_maps() -> void:
+	"""Fetch maps from worlds API"""
+	if is_loading_maps:
+		return
+
+	is_loading_maps = true
+	print("[RoomCreation] 📤 Fetching available maps from API...")
+
+	var url := "http://localhost:30820/api/worlds"
+	var headers: PackedStringArray = ["Content-Type: application/json"]
+
+	var err := _http_worlds.request(url, headers)
+	if err != OK:
+		print("[RoomCreation] ❌ HTTP error:", err)
+		_populate_fallback_maps()
+		is_loading_maps = false
+
+func _on_worlds_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	print("[RoomCreation] 📥 Worlds response:", response_code, " result:", result)
+	is_loading_maps = false
+
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		print("[RoomCreation] ⚠️ Failed to fetch worlds, using fallback maps")
+		_populate_fallback_maps()
+		return
+
+	var json_text: String = body.get_string_from_utf8()
+	var json := JSON.new()
+	if json.parse(json_text) != OK:
+		print("[RoomCreation] ❌ Failed to parse JSON")
+		_populate_fallback_maps()
+		return
+
+	var data := json.data as Dictionary
+	var worlds: Array = data.get("worlds", []) as Array
+
+	if worlds.size() == 0:
+		print("[RoomCreation] ℹ️ No worlds found, using fallback maps")
+		_populate_fallback_maps()
+		return
+
+	# Populate map dropdown with world names
+	available_maps.clear()
+	map_dropdown.clear()
+	map_dropdown.disabled = false
+
+	for world: Variant in worlds:
+		if typeof(world) == TYPE_DICTIONARY:
+			var world_dict := world as Dictionary
+			var world_name: String = str(world_dict.get("name", "Unknown"))
+			available_maps.append(world_dict)
+			map_dropdown.add_item(world_name)
+
+	map_dropdown.select(0)
+	print("[RoomCreation] ✅ Loaded ", available_maps.size(), " maps from API")
+
+func _populate_fallback_maps() -> void:
+	"""Populate with hardcoded fallback maps"""
+	const FALLBACK_MAPS: Array[String] = ["Default", "Arena", "Fortress", "Plaza"]
+
+	map_dropdown.clear()
+	map_dropdown.disabled = false
+	available_maps.clear()
+
+	for map_name: String in FALLBACK_MAPS:
+		map_dropdown.add_item(map_name)
+		available_maps.append({"name": map_name})
+
+	map_dropdown.select(0)
+	print("[RoomCreation] ✅ Loaded ", FALLBACK_MAPS.size(), " fallback maps")
 func show_dialog() -> void:
 	"""Show the room creation dialog"""
 	print("[RoomCreation] Showing dialog...")
@@ -98,6 +170,11 @@ func show_dialog() -> void:
 	is_creating = false
 	create_button.disabled = false
 	status_label.text = ""
+
+	# Fetch maps when dialog shows
+	if available_maps.size() == 0:
+		fetch_available_maps()
+
 	print("[RoomCreation] Dialog visible: true, ready to create")
 
 func hide_dialog() -> void:

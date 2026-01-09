@@ -165,48 +165,47 @@ export function setupWebSocket(server: http.Server) {
             return send(ws, "error", { reason: "authentication_required" });
           }
 
-          if (!msg.data || typeof (msg.data as any).gamemode !== "string") {
-            return send(ws, "error", { reason: "invalid_create_room" });
+          // For global mode, the room should already exist from HTTP POST
+          // Check if user already has a room
+          const existingRoom = roomRepo.getPlayerCurrentRoom(session.userId!);
+
+          if (!existingRoom) {
+            return send(ws, "error", {
+              reason: "no_room_found",
+              message: "Room must be created via HTTP POST /api/rooms first",
+            });
           }
 
-          const gamemode = (msg.data as any).gamemode;
-          const mapName = (msg.data as any).map_name || null;
-          const maxPlayers = (msg.data as any).max_players || 8;
-          const isPublic = (msg.data as any).is_public !== false;
+          // Use the existing room from database
+          const roomId = existingRoom.id;
 
-          // Create room in memory
-          const room = roomManager.createRoom(
-            session.version,
-            session.name,
-            ip
-          );
+          // Create room in memory if it doesn't exist yet
+          let room = roomManager.getRoom(roomId);
+          if (!room) {
+            room = roomManager.createRoomWithId(
+              roomId,
+              session.version,
+              session.name,
+              ip
+            );
+          }
 
-          // Persist to database
-          roomRepo.createRoom({
-            id: room.id,
-            hostUserId: session.userId!,
-            hostUsername: session.name,
-            gamemode,
-            mapName,
-            maxPlayers,
-            isPublic,
-          });
-
-          // Add host to room session (increments player count to 1)
-          roomRepo.addPlayerSession(session.userId!, room.id);
+          // Host already added to player_sessions in HTTP POST
+          // Just update session and respond
           console.log(
-            `[WebSocket] 👑 Host ${session.userId} joined room ${room.id}`
+            `[WebSocket] 👑 Host ${session.userId} confirming room ${roomId}`
           );
 
           session.peerId = 1;
-          session.roomId = room.id;
+          session.roomId = roomId;
           send(ws, "room_created", {
-            roomId: room.id,
+            roomId: roomId,
             peerId: 1,
-            gamemode,
+            gamemode: existingRoom.gamemode,
+            mapName: existingRoom.map_name,
           });
           logInfo(
-            `room created: roomId=${room.id} gamemode=${gamemode} host=${session.name}`
+            `room created: roomId=${roomId} gamemode=${existingRoom.gamemode} host=${session.name}`
           );
           break;
         }
@@ -225,50 +224,70 @@ export function setupWebSocket(server: http.Server) {
           ) {
             return send(ws, "error", { reason: "invalid_join_room" });
           }
-          const result = roomManager.joinRoom(
-            (msg.data as any).roomId,
-            (msg.data as any).version,
-            (msg.data as any).name,
-            ip
-          );
+
+          const roomId = (msg.data as any).roomId;
+          const version = (msg.data as any).version;
+          const playerName = (msg.data as any).name;
+
+          // Check if room exists in memory; if not, try to load from database
+          let room = roomManager.getRoom(roomId);
+          if (!room) {
+            // Room not in memory yet; create it from database info
+            const dbRoom = roomRepo.getRoomById(roomId);
+            if (!dbRoom) {
+              return send(ws, "error", { reason: "room_not_found" });
+            }
+            // Create room in memory with info from database
+            room = roomManager.createRoomWithId(
+              roomId,
+              version,
+              dbRoom.host_username,
+              ip
+            );
+            console.log(
+              `[WebSocket] 📂 Loaded room ${roomId} from database into memory`
+            );
+          }
+
+          const result = roomManager.joinRoom(roomId, version, playerName, ip);
           if ("error" in result) {
             return send(ws, "error", { reason: result.error });
           }
-          const { room, peerId } = result;
+          const { room: updatedRoom, peerId } = result;
           session.peerId = peerId;
-          session.name = (msg.data as any).name;
-          session.version = (msg.data as any).version;
-          session.roomId = room.id;
+          session.name = playerName;
+          session.version = version;
+          session.roomId = roomId;
 
           // Add player to room session (enforces single-room, increments player count)
-          roomRepo.addPlayerSession(session.userId!, room.id);
+          roomRepo.addPlayerSession(session.userId!, roomId);
           console.log(
-            `[WebSocket] 🎮 Player ${session.userId} joined room ${room.id}`
+            `[WebSocket] 🎮 Player ${session.userId} joined room ${roomId}`
           );
 
           // Update player count in database
-          const memberCount = roomManager.getRoomMembers(room.id).length;
-          roomRepo.updatePlayerCount(room.id, memberCount);
+          const memberCount = roomManager.getRoomMembers(roomId).length;
+          roomRepo.updatePlayerCount(roomId, memberCount);
 
-          const members = roomManager.getRoomMembers(room.id);
+          const members = roomManager.getRoomMembers(roomId);
           send(ws, "room_joined", {
-            roomId: room.id,
+            roomId: roomId,
             peerId,
             members: members.map((c) => ({
               peerId: c.peerId,
               name: c.name,
               isHost: c.isHost,
             })),
-            currentTbw: room.currentTbw,
+            currentTbw: updatedRoom.currentTbw,
           });
           broadcast(
-            room,
+            updatedRoom,
             "peer_joined",
             { peerId, name: session.name },
             peerId
           );
           logInfo(
-            `peer joined: roomId=${room.id} peerId=${peerId} name=${session.name}`
+            `peer joined: roomId=${roomId} peerId=${peerId} name=${session.name}`
           );
           break;
         }

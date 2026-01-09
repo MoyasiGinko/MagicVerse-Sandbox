@@ -8,6 +8,7 @@ import authRoutes from "./api/authRoutes";
 import roomRoutes from "./api/roomRoutes";
 import statsRoutes from "./api/statsRoutes";
 import userRoutes from "./api/userRoutes";
+import worldRoutes from "./api/worldRoutes";
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +25,7 @@ runMigrations();
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/worlds", worldRoutes);
 app.use("/api", statsRoutes);
 
 // Health check
@@ -34,13 +36,13 @@ app.get("/health", (_req: Request, res: Response) => {
 // Setup WebSocket
 setupWebSocket(server);
 
-// Periodic cleanup of inactive rooms (every 5 minutes)
+// Periodic cleanup of inactive rooms (every 30 seconds, delete rooms inactive for 1+ minute)
 setInterval(() => {
-  const cleaned = roomRepo.cleanupInactiveRooms(60);
+  const cleaned = roomRepo.cleanupInactiveRooms(1);
   if (cleaned > 0) {
-    console.log(`Cleaned up ${cleaned} inactive rooms`);
+    console.log(`🗑️  Cleaned up ${cleaned} inactive room(s)`);
   }
-}, 5 * 60 * 1000);
+}, 30 * 1000);
 
 server.listen(config.port, () => {
   // eslint-disable-next-line no-console

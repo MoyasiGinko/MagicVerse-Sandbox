@@ -67,9 +67,23 @@ export function runMigrations(): void {
             is_active BOOLEAN DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             started_at DATETIME,
+            inactive_since DATETIME,
             FOREIGN KEY (host_user_id) REFERENCES users(id)
         )
     `);
+
+  // Add inactive_since column to existing rooms table
+  const roomColumns = db.prepare("PRAGMA table_info(rooms)").all();
+  const hasInactiveSince = roomColumns.some(
+    (col: any) => col.name === "inactive_since"
+  );
+  if (!hasInactiveSince) {
+    db.exec(`
+      ALTER TABLE rooms
+      ADD COLUMN inactive_since DATETIME
+    `);
+    console.log("✅ Added inactive_since column to rooms table");
+  }
 
   // Player sessions table - tracks real-time WebSocket connections
   db.exec(`
@@ -97,6 +111,23 @@ export function runMigrations(): void {
         )
     `);
 
+  // Worlds table
+  db.exec(`
+        CREATE TABLE IF NOT EXISTS worlds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(255) NOT NULL,
+            featured BOOLEAN NOT NULL DEFAULT 0,
+            date DATE NOT NULL,
+            downloads INTEGER NOT NULL DEFAULT 0 CHECK (downloads >= 0),
+            version VARCHAR(64) NOT NULL,
+            author VARCHAR(255) NOT NULL,
+            image TEXT NOT NULL,
+            tbw TEXT NOT NULL,
+            reports INTEGER NOT NULL DEFAULT 0 CHECK (reports >= 0),
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
   // Create indexes for better query performance
   db.exec(`
         CREATE INDEX IF NOT EXISTS idx_rooms_gamemode ON rooms(gamemode);
@@ -104,6 +135,9 @@ export function runMigrations(): void {
         CREATE INDEX IF NOT EXISTS idx_rooms_is_public ON rooms(is_public);
         CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_worlds_featured ON worlds(featured);
+        CREATE INDEX IF NOT EXISTS idx_worlds_author ON worlds(author);
+        CREATE INDEX IF NOT EXISTS idx_worlds_downloads ON worlds(downloads);
     `);
 
   console.log("Database migrations completed successfully");

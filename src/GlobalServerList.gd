@@ -118,8 +118,8 @@ func _create_room_entry(room: Dictionary) -> void:
 
 	# Gamemode and Map
 	var title_label := Label.new()
-	var gamemode: String = room.get("gamemode", "Unknown")
-	var map_name: String = room.get("map_name", "Unknown Map")
+	var gamemode: String = str(room.get("gamemode", "Unknown"))
+	var map_name: String = str(room.get("map_name", "Unknown Map"))
 	title_label.text = "%s - %s" % [gamemode, map_name]
 	print("[ServerList] 🎮 Room gamemode: ", gamemode, ", map: ", map_name)
 	title_label.add_theme_font_size_override("font_size", 14)

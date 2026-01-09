@@ -45,6 +45,31 @@ export class RoomManager {
     return room;
   }
 
+  createRoomWithId(
+    roomId: string,
+    version: string,
+    hostName: string,
+    hostIp: string
+  ): GameRoom {
+    const room: GameRoom = {
+      id: roomId,
+      hostPeerId: 1,
+      version,
+      clients: new Map(),
+      nextPeerId: 2,
+      currentTbw: [],
+      bannedIps: new Set(),
+    };
+    room.clients.set(1, {
+      peerId: 1,
+      name: hostName,
+      version,
+      isHost: true,
+    });
+    this.rooms.set(roomId, room);
+    return room;
+  }
+
   getRoom(roomId: string): GameRoom | undefined {
     return this.rooms.get(roomId);
   }

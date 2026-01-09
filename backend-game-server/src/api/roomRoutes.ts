@@ -76,6 +76,10 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       "[RoomAPI] ✅ Room created successfully (current_players=0, awaiting WebSocket join)"
     );
 
+    // Add host to player_sessions so they can join via WebSocket
+    console.log("[RoomAPI] 👑 Adding host to player_sessions...");
+    roomRepo.addPlayerSession(userId, roomId);
+
     console.log("[RoomAPI] 📤 Sending response with room data");
     res.status(201).json({
       success: true,

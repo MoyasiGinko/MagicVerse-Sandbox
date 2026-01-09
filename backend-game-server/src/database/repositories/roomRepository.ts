@@ -12,6 +12,7 @@ export interface Room {
   is_active: boolean;
   created_at: string;
   started_at: string | null;
+  inactive_since: string | null;
 }
 
 export interface CreateRoomInput {
@@ -78,10 +79,11 @@ export class RoomRepository {
   setRoomActive(roomId: string, isActive: boolean): void {
     const stmt = this.db.prepare(`
             UPDATE rooms
-            SET is_active = ?
+            SET is_active = ?,
+                inactive_since = CASE WHEN ? = 0 THEN CURRENT_TIMESTAMP ELSE NULL END
             WHERE id = ?
         `);
-    stmt.run(isActive ? 1 : 0, roomId);
+    stmt.run(isActive ? 1 : 0, isActive ? 1 : 0, roomId);
   }
 
   setRoomStarted(roomId: string): void {
@@ -98,13 +100,19 @@ export class RoomRepository {
     stmt.run(roomId);
   }
 
-  cleanupInactiveRooms(olderThanMinutes: number = 60): number {
+  cleanupInactiveRooms(olderThanMinutes: number = 1): number {
     const stmt = this.db.prepare(`
             DELETE FROM rooms
             WHERE is_active = 0
-            AND datetime(created_at) < datetime('now', '-' || ? || ' minutes')
+            AND inactive_since IS NOT NULL
+            AND datetime(inactive_since) < datetime('now', '-' || ? || ' minutes')
         `);
     const result = stmt.run(olderThanMinutes);
+    if (result.changes > 0) {
+      console.log(
+        `[RoomRepo] 🧹 Cleaned up ${result.changes} inactive room(s) older than ${olderThanMinutes} minute(s)`
+      );
+    }
     return result.changes;
   }
 
