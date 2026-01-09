@@ -79,7 +79,17 @@ function validateJson(raw: string): Message | null {
 function cleanupClient(ws: WebSocket) {
   const session = clientSessions.get(ws);
   if (!session) return;
-  const { roomId, peerId, userId } = session;
+  const { roomId, peerId, userId, isAuthenticated, name } = session;
+
+  // Broadcast user_offline to all clients if authenticated
+  if (isAuthenticated && userId) {
+    broadcastToAll("user_offline", {
+      user_id: userId,
+      username: name,
+    });
+    logInfo(`Broadcasting user_offline for user ${userId}`);
+  }
+
   clientSessions.delete(ws);
   if (roomId && peerId !== null) {
     const room = roomManager.getRoom(roomId);
@@ -163,6 +173,16 @@ export function setupWebSocket(server: http.Server) {
           logInfo(
             `handshake: name=${session.name} auth=${session.isAuthenticated}`
           );
+
+          // Broadcast user_online to all clients if authenticated
+          if (session.isAuthenticated && session.userId) {
+            broadcastToAll("user_online", {
+              user_id: session.userId,
+              username: session.name,
+            });
+            logInfo(`Broadcasting user_online for user ${session.userId}`);
+          }
+
           break;
         }
 

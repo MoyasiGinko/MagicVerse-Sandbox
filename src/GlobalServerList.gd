@@ -26,6 +26,7 @@ var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
 var current_rooms: Array = []
 var _http_refresh: HTTPRequest  # Dedicated HTTPRequest for continuous refreshes
+var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
 
 func _ready() -> void:
 	print("[ServerList] Initializing...")
@@ -36,57 +37,38 @@ func _ready() -> void:
 		backend.rooms_fetched.connect(_on_rooms_fetched)
 		print("[ServerList] Backend rooms_fetched signal connected")
 
-	# Connect to MultiplayerNodeAdapter for real-time room updates
-	var main: Node = get_tree().current_scene
-	if main and main.has_node("MultiplayerNodeAdapter"):
-		var node_adapter: Node = main.get_node("MultiplayerNodeAdapter")
-		if node_adapter and node_adapter.has_signal("rooms_list_changed"):
-			node_adapter.rooms_list_changed.connect(_on_node_adapter_rooms_changed)
-			print("[ServerList] MultiplayerNodeAdapter rooms_list_changed signal connected")
-
-	# Create dedicated HTTPRequest for continuous refreshes (separate from backend's HTTPRequest)
+	# Create dedicated HTTPRequest for fetching rooms on demand
 	_http_refresh = HTTPRequest.new()
 	add_child(_http_refresh)
 	_http_refresh.request_completed.connect(_on_refresh_response)
 
-	# Setup auto-refresh timer (1 second for real-time updates)
-	refresh_timer = Timer.new()
-	add_child(refresh_timer)
-	refresh_timer.timeout.connect(refresh_server_list)
-	refresh_timer.wait_time = 1.0  # Update every 1 second for near real-time updates
-	refresh_timer.autostart = false
-	print("[ServerList] Auto-refresh timer created (1 second interval)")
+	# Get reference to WebSocket Manager
+	ws_manager = get_tree().root.get_child(0).get_node_or_null("WSManager") as GlobalWebSocketManager
+	if not ws_manager:
+		# Try to get it as an autoload directly
+		ws_manager = get_node("/root/WSManager") as GlobalWebSocketManager
+
+	# Connect to WebSocket Manager for real-time room updates
+	if ws_manager:
+		ws_manager.rooms_list_changed.connect(_on_rooms_changed_websocket)
+		ws_manager.connection_established.connect(_on_websocket_connected)
+		print("[ServerList] ✅ WebSocket signals connected")
+	else:
+		push_error("[ServerList] ❌ WSManager not found!")
 
 	# Initial load
 	if Global.is_authenticated:
 		print("[ServerList] User authenticated, loading initial server list")
 		refresh_server_list()
-		# Start auto-refresh immediately (don't wait for menu visibility)
-		start_refresh()
 	else:
 		print("[ServerList] User not authenticated yet, skipping initial load")
 
 	print("[ServerList] Initialization complete!")
 
-func start_refresh() -> void:
-	"""Start auto-refreshing the server list"""
-	print("[ServerList] 🔄 Starting auto-refresh (every 5 seconds)")
-	if refresh_timer.is_stopped():
-		refresh_server_list()  # Do one immediate refresh
-		refresh_timer.start()
-	else:
-		print("[ServerList] ℹ️ Auto-refresh already running")
-
-func stop_refresh() -> void:
-	"""Stop auto-refreshing the server list"""
-	print("[ServerList] ⏸️ Stopping auto-refresh")
-	refresh_timer.stop()
-
 func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
 	if not Global.is_authenticated or Global.auth_token == "":
 		return
-	# Make HTTP request directly to avoid HTTPRequest blocking issues
 	var url := "http://localhost:30820/api/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
@@ -108,13 +90,18 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 
 func _on_rooms_fetched(rooms: Array) -> void:
 	"""Handle rooms fetched from backend script"""
-	print("[ServerList] 📥 Backend returned ", rooms.size(), " rooms")
+	print("[ServerList] 📥 Received ", rooms.size(), " rooms")
 	current_rooms = rooms
 	_populate_server_list(rooms)
 
-func _on_node_adapter_rooms_changed() -> void:
-	"""Handle real-time room update from WebSocket"""
-	print("[ServerList] 🔔 Room list changed via WebSocket, refreshing...")
+func _on_rooms_changed_websocket() -> void:
+	"""Handle real-time room list changes from WebSocket"""
+	print("[ServerList] 🔔 Received rooms_changed event from WebSocket")
+	refresh_server_list()
+
+func _on_websocket_connected() -> void:
+	"""Handle WebSocket connection established"""
+	print("[ServerList] 🔌 WebSocket connected, refreshing server list")
 	refresh_server_list()
 
 func _populate_server_list(rooms: Array) -> void:

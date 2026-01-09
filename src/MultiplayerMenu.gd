@@ -259,9 +259,4 @@ func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""
 	get_node(a).visible = true
 	get_node(b).visible = false
-
-	# Control GlobalServerList refresh based on visibility
-	if a == "GlobalPlayMenu":
-		global_server_list.start_refresh()
-	else:
-		global_server_list.stop_refresh()
+	# WebSocket handles real-time updates automatically

@@ -9,6 +9,7 @@ signal verification_complete(is_valid: bool)
 # Backend URL
 var backend_url := "http://localhost:30820"
 var http_request: HTTPRequest = null
+var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
 
 # Token storage
 const TOKEN_SAVE_PATH := "user://tinybox_token.json"
@@ -18,6 +19,9 @@ func _ready() -> void:
 	http_request = HTTPRequest.new()
 	add_child(http_request)
 	http_request.request_completed.connect(_on_http_request_completed)
+
+	# Get reference to WebSocket Manager
+	ws_manager = get_node_or_null("/root/WSManager") as GlobalWebSocketManager
 
 ## Register a new user
 func register_user(username: String, email: String, password: String) -> void:
@@ -75,9 +79,11 @@ func load_saved_token() -> String:
 					Global.player_display_name = username
 					Global.display_name = username
 				Global.is_authenticated = true
+				# Connect to WebSocket for real-time updates
+				if ws_manager:
+					ws_manager.connect_to_server()
 				return token
 	return ""
-
 ## Save token to disk
 func save_token(token: String, username: String, display_name: String = "") -> void:
 	var data: Dictionary = {
@@ -96,6 +102,9 @@ func save_token(token: String, username: String, display_name: String = "") -> v
 	Global.player_username = username
 	Global.player_display_name = display_name if display_name else username
 	Global.display_name = Global.player_display_name
+	# Connect to WebSocket for real-time updates
+	if ws_manager:
+		ws_manager.connect_to_server()
 
 ## Clear saved token
 func clear_saved_token() -> void:
@@ -105,6 +114,9 @@ func clear_saved_token() -> void:
 	Global.player_username = ""
 	Global.player_display_name = ""
 	Global.display_name = ""
+	# Disconnect WebSocket
+	if ws_manager:
+		ws_manager.disconnect_from_server()
 
 ## Private helper to make HTTP requests
 func _make_request(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
