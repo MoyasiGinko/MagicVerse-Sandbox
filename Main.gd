@@ -948,12 +948,20 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 	camera_inst.global_position = Vector3(70, 190, 0)
 	print("[Main] ✅ Camera added")
 
+	# Spawn the player character for Node backend
+	print("[Main] 👤 Spawning player character...")
+	var player : RigidPlayer = PLAYER.instantiate()
+	player.name = str(node_peer.get_unique_peer_id())
+	$World.add_child(player, true)
+	Global.connected_to_server = true
+	print("[Main] ✅ Player spawned with peer_id: ", node_peer.get_unique_peer_id())
+
 	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
 	get_tree().current_scene.get_node("GameCanvas").visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
-	Global.get_world().set_loading_canvas_visiblity(true)
-	Global.get_world().set_loading_canvas_text("Connecting to server...")
+	Global.get_world().set_loading_canvas_visiblity(false)
+	print("[Main] 🎉 Successfully joined game world!")
 
 # Node backend signal handlers
 func _on_room_created(room_id: String) -> void:
