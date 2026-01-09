@@ -6,6 +6,7 @@ class_name MultiplayerNodeAdapter
 signal room_created(room_id: String)
 signal room_joined(peer_id: int, room_id: String)
 signal connection_failed(reason: String)
+signal rooms_list_changed  # New signal for room list changes
 
 var ws: WebSocketPeer = null
 var server_url: String = "ws://localhost:30820"
@@ -78,6 +79,8 @@ func _on_ws_message() -> void:
 			_handle_room_created(msg_data)
 		"room_joined":
 			_handle_room_joined(msg_data)
+		"rooms_changed":
+			_handle_rooms_changed()
 		_:
 			push_warning("Unknown message type: " + str(msg_type))
 
@@ -167,6 +170,11 @@ func _handle_error(data: Dictionary) -> void:
 	push_error("Backend error: " + message)
 	UIHandler.show_alert(message, 8, false, UIHandler.alert_colour_error)
 	connection_failed.emit(message)
+
+func _handle_rooms_changed() -> void:
+	"""Handle room list change notification from backend"""
+	print("[NodeAdapter] 🔔 Rooms list changed on backend, triggering refresh")
+	rooms_list_changed.emit()
 
 # Send message to backend
 func _send_message(msg_type: String, msg_data: Dictionary) -> void:

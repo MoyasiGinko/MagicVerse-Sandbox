@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { RoomRepository } from "../database/repositories/roomRepository";
 import { authenticateToken, AuthRequest } from "../auth/middleware";
+import { notifyAllClientsRoomsChanged } from "../networking/websocket";
 
 const router = Router();
 const roomRepo = new RoomRepository();
@@ -79,6 +80,10 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
     // Add host to player_sessions so they can join via WebSocket
     console.log("[RoomAPI] 👑 Adding host to player_sessions...");
     roomRepo.addPlayerSession(userId, roomId);
+
+    // Notify all connected clients that room list has changed
+    console.log("[RoomAPI] 📢 Broadcasting room creation to all clients...");
+    notifyAllClientsRoomsChanged();
 
     console.log("[RoomAPI] 📤 Sending response with room data");
     res.status(201).json({

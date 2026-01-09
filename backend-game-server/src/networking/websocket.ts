@@ -59,6 +59,13 @@ function broadcast(
   }
 }
 
+function broadcastToAll(type: string, data: unknown) {
+  /**Broadcast to all connected WebSocket clients*/
+  for (const session of clientSessions.values()) {
+    send(session.ws, type, data);
+  }
+}
+
 function validateJson(raw: string): Message | null {
   try {
     const parsed = JSON.parse(raw);
@@ -420,4 +427,9 @@ export function setupWebSocket(server: http.Server) {
   });
 
   return wss;
+}
+
+// Export broadcast function for use in other modules
+export function notifyAllClientsRoomsChanged() {
+  broadcastToAll("rooms_changed", {});
 }

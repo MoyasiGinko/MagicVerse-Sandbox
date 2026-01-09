@@ -25,6 +25,7 @@ signal room_selected(room_id: String)
 var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
 var current_rooms: Array = []
+var _http_refresh: HTTPRequest  # Dedicated HTTPRequest for continuous refreshes
 
 func _ready() -> void:
 	print("[ServerList] Initializing...")
@@ -35,18 +36,33 @@ func _ready() -> void:
 		backend.rooms_fetched.connect(_on_rooms_fetched)
 		print("[ServerList] Backend rooms_fetched signal connected")
 
-	# Setup auto-refresh timer (5 seconds)
+	# Connect to MultiplayerNodeAdapter for real-time room updates
+	var main: Node = get_tree().current_scene
+	if main and main.has_node("MultiplayerNodeAdapter"):
+		var node_adapter: Node = main.get_node("MultiplayerNodeAdapter")
+		if node_adapter and node_adapter.has_signal("rooms_list_changed"):
+			node_adapter.rooms_list_changed.connect(_on_node_adapter_rooms_changed)
+			print("[ServerList] MultiplayerNodeAdapter rooms_list_changed signal connected")
+
+	# Create dedicated HTTPRequest for continuous refreshes (separate from backend's HTTPRequest)
+	_http_refresh = HTTPRequest.new()
+	add_child(_http_refresh)
+	_http_refresh.request_completed.connect(_on_refresh_response)
+
+	# Setup auto-refresh timer (1 second for real-time updates)
 	refresh_timer = Timer.new()
 	add_child(refresh_timer)
 	refresh_timer.timeout.connect(refresh_server_list)
-	refresh_timer.wait_time = 5.0
+	refresh_timer.wait_time = 1.0  # Update every 1 second for near real-time updates
 	refresh_timer.autostart = false
-	print("[ServerList] Auto-refresh timer created (5 second interval)")
+	print("[ServerList] Auto-refresh timer created (1 second interval)")
 
 	# Initial load
 	if Global.is_authenticated:
 		print("[ServerList] User authenticated, loading initial server list")
 		refresh_server_list()
+		# Start auto-refresh immediately (don't wait for menu visibility)
+		start_refresh()
 	else:
 		print("[ServerList] User not authenticated yet, skipping initial load")
 
@@ -54,32 +70,52 @@ func _ready() -> void:
 
 func start_refresh() -> void:
 	"""Start auto-refreshing the server list"""
-	print("[ServerList] Starting auto-refresh")
-	refresh_server_list()
-	refresh_timer.start()
+	print("[ServerList] 🔄 Starting auto-refresh (every 5 seconds)")
+	if refresh_timer.is_stopped():
+		refresh_server_list()  # Do one immediate refresh
+		refresh_timer.start()
+	else:
+		print("[ServerList] ℹ️ Auto-refresh already running")
 
 func stop_refresh() -> void:
 	"""Stop auto-refreshing the server list"""
-	print("[ServerList] Stopping auto-refresh")
+	print("[ServerList] ⏸️ Stopping auto-refresh")
 	refresh_timer.stop()
 
 func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
-	print("[ServerList] === REFRESH REQUEST ===")
 	if not Global.is_authenticated or Global.auth_token == "":
-		print("[ServerList] ❌ Not authenticated, skipping refresh")
 		return
-	print("[ServerList] 🔄 Requesting rooms via backend...")
-	if backend:
-		backend.fetch_rooms()
-	else:
-		print("[ServerList] ❌ Backend not found; cannot fetch rooms")
+	# Make HTTP request directly to avoid HTTPRequest blocking issues
+	var url := "http://localhost:30820/api/rooms"
+	var headers: PackedStringArray = [
+		"Authorization: Bearer " + Global.auth_token,
+		"Content-Type: application/json"
+	]
+	_http_refresh.request(url, headers)
+
+func _on_refresh_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	"""Handle rooms response from direct HTTP request"""
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		return
+	var json_text: String = body.get_string_from_utf8()
+	var json := JSON.new()
+	if json.parse(json_text) != OK:
+		return
+	var data := json.data as Dictionary
+	var rooms: Array = data.get("rooms", []) as Array
+	_on_rooms_fetched(rooms)
 
 func _on_rooms_fetched(rooms: Array) -> void:
 	"""Handle rooms fetched from backend script"""
 	print("[ServerList] 📥 Backend returned ", rooms.size(), " rooms")
 	current_rooms = rooms
 	_populate_server_list(rooms)
+
+func _on_node_adapter_rooms_changed() -> void:
+	"""Handle real-time room update from WebSocket"""
+	print("[ServerList] 🔔 Room list changed via WebSocket, refreshing...")
+	refresh_server_list()
 
 func _populate_server_list(rooms: Array) -> void:
 	"""Populate the UI with rooms from the server"""
