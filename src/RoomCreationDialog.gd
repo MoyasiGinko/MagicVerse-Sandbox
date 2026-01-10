@@ -19,15 +19,20 @@ class_name RoomCreationDialog
 
 signal room_created(room_id: String, room_data: Dictionary)
 
-# Available gamemodes
+# Available gamemodes (matching actual gamemode names from Gamemode*.gd files)
 const GAMEMODES: Array[String] = [
 	"Deathmatch",
-	"Balls",
+	"Team Deathmatch",
+	"Balls!!!",
+	"Team Balls!!!",
 	"Hide & Seek",
-	"King of the Hill",
+	"Capture",
+	"Team Capture",
 	"Race",
+	"Team Race",
 	"Home Run",
-	"1v1"
+	"Team Home Run",
+	"One vs. All"
 ]
 
 var available_maps: Array = []
