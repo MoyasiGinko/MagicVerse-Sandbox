@@ -845,6 +845,11 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 	print("[Main] Player name: ", Global.display_name)
 	print("[Main] Auth token: ", Global.auth_token.substr(0, 20) if Global.auth_token.length() > 20 else "SHORT_TOKEN")
 
+	# Store the selected gamemode for later use
+	if gamemode != "":
+		Global.set_meta("selected_gamemode", gamemode)
+		print("[Main] 💾 Stored selected gamemode: ", gamemode)
+
 	# Check if adapter already exists and clean it up
 	if node_peer != null and is_instance_valid(node_peer):
 		print("[Main] ⚠️  Existing adapter found, cleaning up...")
@@ -962,6 +967,48 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 
 	Global.get_world().set_loading_canvas_visiblity(false)
 	print("[Main] 🎉 Successfully joined game world!")
+
+	# Select and optionally start the gamemode that was chosen during room creation
+	if Global.has_meta("selected_gamemode"):
+		var selected_gamemode_name: String = Global.get_meta("selected_gamemode")
+		print("[Main] 🎮 Attempting to select gamemode: '", selected_gamemode_name, "'")
+
+		# Debug: Print all gamemode names in the list
+		print("[Main] 🔍 Available gamemodes in World.gamemode_list:")
+		for i in range($World.gamemode_list.size()):
+			print("[Main]   [", i, "] '", $World.gamemode_list[i].gamemode_name, "'")
+
+		# Find the gamemode index in the gamemode list
+		var gamemode_idx: int = -1
+		for i in range($World.gamemode_list.size()):
+			if $World.gamemode_list[i].gamemode_name == selected_gamemode_name:
+				gamemode_idx = i
+				print("[Main] 🎯 Match found at index ", i)
+				break
+
+		if gamemode_idx >= 0:
+			print("[Main] ✅ Found gamemode at index ", gamemode_idx, ": ", selected_gamemode_name)
+			# Update the in-game gamemode selector to show the selected mode
+			var gamemode_menu: Node = get_tree().current_scene.get_node_or_null("GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
+			if gamemode_menu and gamemode_menu.has_method("select_gamemode"):
+				gamemode_menu.select_gamemode(gamemode_idx)
+				print("[Main] 🎮 Gamemode selector updated to: ", selected_gamemode_name)
+			else:
+				print("[Main] ⚠️  Could not find GamemodeMenu node or method at path: GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
+
+			# Auto-start the gamemode if this is the host (peer 1)
+			if node_peer.is_server():
+				print("[Main] 🚀 Auto-starting gamemode as host...")
+				# Start with default params: [10 minutes time limit, default speed/health/jump, no low grav]
+				var default_params: Array = [10, 0]
+				var default_mods: Array = [0, 5, 20, 1, false]
+				Global.server_start_gamemode(gamemode_idx, default_params, default_mods)
+				print("[Main] ✅ Gamemode started: ", selected_gamemode_name)
+		else:
+			print("[Main] ⚠️  Could not find gamemode: ", selected_gamemode_name)
+
+		# Clear the stored gamemode
+		Global.remove_meta("selected_gamemode")
 
 # Node backend signal handlers
 func _on_room_created(room_id: String) -> void:

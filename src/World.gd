@@ -538,51 +538,27 @@ func parse_tbw(lines : Array, return_as_container : bool = false) -> Node3D:
 
 # add gamemodes based on their requirements
 func add_all_gamemodes() -> void:
-	# add FFA & Home Run, always available
-	add_gamemode(GamemodeDeathmatch.new(true))
-	add_gamemode(GamemodeHomeRun.new(true))
-	add_gamemode(GamemodeBalls.new(true))
+	# Always register all gamemodes so the selector shows every option.
+	# Order matches RoomCreationDialog.gd for consistency.
+	# Some modes depend on specific map features (capture points, team spawns,
+	# finish lines) but we still expose them; the mode itself can validate
+	# requirements at start time.
 
-	var has_capture_point : bool = false
-	# check capture ffa
-	for obj in get_children():
-		if obj is CapturePoint:
-			add_gamemode(GamemodeKOTH.new(true))
-			has_capture_point = true
-			break
+	gamemode_list.clear()
 
-	var has_finish_line : bool = false
-	# check finishline
-	for obj in get_children():
-		if obj is SpawnPoint:
-			if obj.checkpoint == SpawnPoint.CheckpointType.FINISH_LINE:
-				add_gamemode(GamemodeRace.new(true))
-				has_finish_line = true
-				break
-
-	# check tdm spawns
-	var first_team_spawn_name := ""
-	for obj in get_children():
-		if obj is SpawnPoint:
-			if obj.team_name != "Default":
-				# don't replace first found
-				if first_team_spawn_name != "":
-					first_team_spawn_name = obj.team_name
-				# at least two different team spawns
-				if obj.team_name != first_team_spawn_name:
-					# both tdm and hide and seek can be added
-					add_gamemode(GamemodeDeathmatch.new(false))
-					add_gamemode(GamemodeHomeRun.new(false))
-					add_gamemode(GamemodeBalls.new(false))
-					add_gamemode(GamemodeOneVersusAll.new())
-					add_gamemode(GamemodeHideSeek.new())
-					if has_capture_point:
-						# team capture
-						add_gamemode(GamemodeKOTH.new(false))
-					if has_finish_line:
-						add_gamemode(GamemodeRace.new(false))
-					# break out of loop once added
-					break
+	# Order must match RoomCreationDialog GAMEMODES array
+	add_gamemode(GamemodeDeathmatch.new(true))         # Deathmatch
+	add_gamemode(GamemodeDeathmatch.new(false))        # Team Deathmatch
+	add_gamemode(GamemodeBalls.new(true))              # Balls!!!
+	add_gamemode(GamemodeBalls.new(false))             # Team Balls!!!
+	add_gamemode(GamemodeHideSeek.new())               # Hide & Seek
+	add_gamemode(GamemodeKOTH.new(true))               # Capture
+	add_gamemode(GamemodeKOTH.new(false))              # Team Capture
+	add_gamemode(GamemodeRace.new(true))               # Race
+	add_gamemode(GamemodeRace.new(false))              # Team Race
+	add_gamemode(GamemodeHomeRun.new(true))            # Home Run
+	add_gamemode(GamemodeHomeRun.new(false))           # Team Home Run
+	add_gamemode(GamemodeOneVersusAll.new())           # One vs. All
 
 func add_gamemode(new : Gamemode) -> void:
 	if !gamemode_list.has(new):

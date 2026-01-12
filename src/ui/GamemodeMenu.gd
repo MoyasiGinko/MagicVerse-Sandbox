@@ -61,7 +61,7 @@ func _on_tbw_loaded() -> void:
 	# as server: populate all peers' gamemode lists
 	# including self
 	_populate_client_gamemode_list.rpc(gamemode_names_list)
-	
+
 @rpc("any_peer", "call_local", "reliable")
 func _populate_client_gamemode_list(gamemode_names : Array) -> void:
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != get_multiplayer_authority() && multiplayer.get_remote_sender_id() != 0:
@@ -85,7 +85,7 @@ func _on_item_selected(index : int) -> void:
 	for c : Node in modifier_list.get_children():
 		c.queue_free()
 	# load new params
-	
+
 	# time limit for all
 	add_param_or_mod_adjuster(true, 0, 10, "Time limit (mins)", 1, 999)
 	# player speed and jump modifier
@@ -95,7 +95,7 @@ func _on_item_selected(index : int) -> void:
 	add_param_or_mod_adjuster(false, 1, 20, "Player maximum health", 1, 100)
 	# low grav toggle modifier
 	add_param_or_mod_toggle(false, 3, false, "Low gravity")
-	
+
 	# gamemode-specific
 	match (gm):
 			"Deathmatch", "Team Deathmatch":
@@ -152,3 +152,11 @@ func add_param_or_mod_toggle(parameter : bool, adj_idx : int, def_val : bool, la
 		checkbox.self_modulate = Color("#fdc0bd")
 	else:
 		checkbox.self_modulate = Color("#00f5bd")
+# Public method to programmatically select a gamemode by index
+func select_gamemode(index: int) -> void:
+	if index >= 0 and index < selector.get_item_count():
+		selector.select(index)
+		_on_item_selected(index)
+		print("[GamemodeMenu] Gamemode selected: ", selector.get_item_text(index))
+	else:
+		print("[GamemodeMenu] Invalid gamemode index: ", index)
