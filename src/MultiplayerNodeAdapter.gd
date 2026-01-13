@@ -9,6 +9,7 @@ signal connection_failed(reason: String)
 signal rooms_list_changed  # New signal for room list changes
 signal peer_connected(peer_id: int)  # For multiplayer system integration
 signal peer_disconnected(peer_id: int)  # For multiplayer system integration
+signal peer_joined_with_name(peer_id: int, peer_name: String)  # For player list updates
 
 var ws: WebSocketPeer = null
 var server_url: String = "ws://localhost:30820"
@@ -17,6 +18,7 @@ var _room_id: String = ""
 var _connected_peers: PackedInt32Array = []
 var _is_connected: bool = false
 var _is_server: bool = false  # Will be true if this peer is the host
+var _pending_members: Array = []  # Store members received before RemotePlayers exists
 
 func _init() -> void:
 	ws = WebSocketPeer.new()
@@ -84,13 +86,17 @@ func _on_ws_message() -> void:
 			_handle_room_joined(msg_data)
 		"rooms_changed":
 			_handle_rooms_changed()
+		"peer_joined":
+			_handle_peer_joined(msg_data)
+		"peer_left":
+			_handle_peer_left(msg_data)
+		"player_state":
+			_handle_player_state(msg_data)
 		_:
 			push_warning("Unknown message type: " + str(msg_type))
 
 func _handle_handshake_accepted(data: Dictionary) -> void:
 	print("[NodeAdapter] ✅ Handshake accepted")
-	print("[NodeAdapter] User ID: ", data.get("user_id", "N/A"))
-	print("[NodeAdapter] Username: ", data.get("username", "N/A"))
 
 func _handle_room_created(data: Dictionary) -> void:
 	_room_id = data.get("roomId", "")
@@ -102,24 +108,36 @@ func _handle_room_created(data: Dictionary) -> void:
 func _handle_room_joined(data: Dictionary) -> void:
 	_room_id = data.get("roomId", "")
 	_peer_id = data.get("peerId", 0)
-	var peers: Array = data.get("peers", [])
+
+	# Backend sends 'members' array with {peerId, name, isHost} objects
+	var members: Array = data.get("members", [])
 	_connected_peers.clear()
-	for p: Variant in peers:
-		if typeof(p) == TYPE_INT:
-			_connected_peers.append(p as int)
-		elif typeof(p) == TYPE_FLOAT:
-			_connected_peers.append(int(p as float))
+	_pending_members.clear()
+
+	for member: Variant in members:
+		if typeof(member) == TYPE_DICTIONARY:
+			var member_dict: Dictionary = member as Dictionary
+			var peer_id: int = member_dict.get("peerId", 0) as int
+			var peer_name: String = member_dict.get("name", "Unknown") as String
+
+			# Skip self
+			if peer_id == _peer_id:
+				continue
+
+			# Add to connected peers list
+			if not _connected_peers.has(peer_id):
+				_connected_peers.append(peer_id)
+
+			# Store member for later spawning (RemotePlayers might not exist yet)
+			_pending_members.append({"peerId": peer_id, "name": peer_name})
 
 	# Peer 1 is always the host in the Node backend
 	_is_server = (_peer_id == 1)
 
-	print("[NodeAdapter] ✅ Room joined: ", _room_id, " (peer ", _peer_id, ")")
-	print("[NodeAdapter] 👥 Connected peers: ", _connected_peers)
-	print("[NodeAdapter] 🎮 Is server: ", _is_server)
+	print("[NodeAdapter] ✅ Room joined: ", _room_id, " peers=", _connected_peers.size(), " (is_server=", _is_server, ")")
 
 	# Emit peer_connected signal for each connected peer (for Godot's multiplayer system)
 	for peer_id in _connected_peers:
-		print("[NodeAdapter] 📡 Emitting peer_connected signal for peer: ", peer_id)
 		peer_connected.emit(peer_id)
 
 	room_joined.emit(_peer_id, _room_id)
@@ -204,20 +222,13 @@ func _handle_rooms_changed() -> void:
 
 # Send message to backend
 func _send_message(msg_type: String, msg_data: Dictionary) -> void:
-	print("[NodeAdapter] 📡 _send_message() called: type='", msg_type, "'")
-	print("[NodeAdapter]   - WebSocket: ", ws)
-	print("[NodeAdapter]   - WebSocket state: ", ws.get_ready_state() if ws else "NULL")
-
 	if ws == null or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
-		print("[NodeAdapter] ❌ ERROR: Cannot send message - WebSocket not open!")
 		push_error("Cannot send message: WebSocket not open")
 		return
 
 	var message: Dictionary = {"type": msg_type, "data": msg_data}
 	var json_str: String = JSON.stringify(message)
-	print("[NodeAdapter] 📨 Message JSON: ", json_str)
 	ws.send_text(json_str)
-	print("[NodeAdapter] ✅ Message sent successfully")
 
 # Protocol methods
 func send_handshake(version: String, player_name: String, token: String = "") -> void:
@@ -299,10 +310,67 @@ func get_room_id() -> String:
 func is_backend_connected() -> bool:
 	return _is_connected and ws != null and ws.get_ready_state() == WebSocketPeer.STATE_OPEN
 
+func spawn_pending_members() -> void:
+	"""Spawn all pending members after RemotePlayers manager is ready"""
+	if _pending_members.is_empty():
+		print("[NodeAdapter] ⚠️ No pending members to spawn")
+		return
+
+	var world: Node = Global.get_world()
+	if not world:
+		print("[NodeAdapter] ❌ World not found, cannot spawn pending members")
+		return
+
+	if not world.has_node("RemotePlayers"):
+		print("[NodeAdapter] ❌ RemotePlayers not found in World")
+		return
+
+	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
+	if not remote_players:
+		print("[NodeAdapter] ❌ RemotePlayers cast failed")
+		return
+
+	print("[NodeAdapter] 🎭 Spawning ", _pending_members.size(), " pending members...")
+	for member_data: Variant in _pending_members:
+		if typeof(member_data) == TYPE_DICTIONARY:
+			var member: Dictionary = member_data as Dictionary
+			var peer_id: int = member.get("peerId", 0) as int
+			var peer_name: String = member.get("name", "Unknown") as String
+
+			# Spawn at random position (will be updated by state sync)
+			remote_players.spawn_remote_player(peer_id, peer_name, Vector3(randf_range(-10, 10), 5, randf_range(-10, 10)))
+			print("[NodeAdapter] ✅ Spawned RemotePlayer for peer ", peer_id, " name=", peer_name)
+
+	_pending_members.clear()
+	print("[NodeAdapter] 🎉 All pending members spawned!")
+
 # Query methods for multiplayer integration
 func get_unique_peer_id() -> int:
 	"""Return the ID of this local peer"""
 	return _peer_id
+
+func get_all_peers_with_names() -> Array:
+	"""Return array of all peers including self, with their names and IDs"""
+	var peers: Array = []
+
+	# Add self
+	peers.append({
+		"peerId": _peer_id,
+		"name": Global.display_name,
+		"is_self": true
+	})
+
+	# Add pending members (peers that joined the room)
+	for member_data: Variant in _pending_members:
+		if typeof(member_data) == TYPE_DICTIONARY:
+			var member: Dictionary = member_data as Dictionary
+			peers.append({
+				"peerId": member.get("peerId", 0),
+				"name": member.get("name", "Unknown"),
+				"is_self": false
+			})
+
+	return peers
 
 func is_server() -> bool:
 	"""Return true if this peer is the server/host"""
@@ -317,6 +385,107 @@ func is_peer_connected(peer: int) -> bool:
 	if peer == _peer_id:
 		return true  # Local peer is always connected to itself
 	return _connected_peers.has(peer)
+
+func _handle_peer_joined(data: Dictionary) -> void:
+	"""Handle notification that a new peer joined the room"""
+	var peer_id: int = data.get("peerId", 0) as int
+	var name: String = data.get("name", "Unknown") as String
+
+	print("[NodeAdapter] 👥 Peer joined: peerId=", peer_id, " name=", name)
+
+	# Add to connected peers list if not already there
+	if not _connected_peers.has(peer_id):
+		_connected_peers.append(peer_id)
+		print("[NodeAdapter] ✅ Added to connected_peers list")
+
+	# Signal that a peer joined (for Godot's multiplayer system)
+	peer_connected.emit(peer_id)
+	peer_joined_with_name.emit(peer_id, name)  # New signal with name for player list
+	print("[NodeAdapter] 📡 Emitted peer_connected signal")
+
+	# Notify World/RemotePlayers to spawn this player
+	var world: Node = Global.get_world()
+	print("[NodeAdapter] 🔍 Looking for World...")
+
+	if not world:
+		print("[NodeAdapter] ❌ World not found")
+		return
+
+	print("[NodeAdapter] ✅ World found")
+
+	if not world.has_node("RemotePlayers"):
+		print("[NodeAdapter] ❌ RemotePlayers not found in World - storing as pending")
+		# Store for later spawning
+		_pending_members.append({"peerId": peer_id, "name": name})
+		return
+
+	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
+	if not remote_players:
+		print("[NodeAdapter] ❌ RemotePlayers cast failed")
+		return
+
+	print("[NodeAdapter] ✅ RemotePlayers manager found, spawning avatar...")
+	remote_players.spawn_remote_player(peer_id, name, Vector3(randf_range(-10, 10), 5, randf_range(-10, 10)))
+	print("[NodeAdapter] ✅ Avatar spawned for peer ", peer_id)
+
+func _handle_peer_left(data: Dictionary) -> void:
+	"""Handle notification that a peer left the room"""
+	var peer_id: int = data.get("peerId", 0) as int
+
+	print("[NodeAdapter] 👋 Peer left: peerId=", peer_id)
+
+	# Remove from connected peers
+	_connected_peers.erase(peer_id)
+
+	# Signal that a peer disconnected
+	peer_disconnected.emit(peer_id)
+
+	# Notify World/RemotePlayers to despawn this player
+	var world: Node = Global.get_world()
+	if world and world.has_node("RemotePlayers"):
+		var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
+		if remote_players:
+			remote_players.despawn_remote_player(peer_id)
+
+func _handle_player_state(data: Dictionary) -> void:
+	"""Handle incoming player state (position, rotation, velocity)"""
+	var peer_id: int = data.get("peerId", 0) as int
+	var pos_data: Dictionary = data.get("position", {"x": 0, "y": 0, "z": 0}) as Dictionary
+	var rot_data: Dictionary = data.get("rotation", {"x": 0, "y": 0, "z": 0}) as Dictionary
+	var vel_data: Dictionary = data.get("velocity", {"x": 0, "y": 0, "z": 0}) as Dictionary
+
+	var position: Vector3 = Vector3(pos_data.get("x", 0) as float, pos_data.get("y", 0) as float, pos_data.get("z", 0) as float)
+	var rotation: Vector3 = Vector3(rot_data.get("x", 0) as float, rot_data.get("y", 0) as float, rot_data.get("z", 0) as float)
+	var velocity: Vector3 = Vector3(vel_data.get("x", 0) as float, vel_data.get("y", 0) as float, vel_data.get("z", 0) as float)
+
+	# Update RemotePlayer position/rotation
+	var world: Node = Global.get_world()
+	if not world:
+		print("[NodeAdapter] ⚠️ player_state received but World not found (peer=", peer_id, ")")
+		return
+
+	if not world.has_node("RemotePlayers"):
+		print("[NodeAdapter] ⚠️ player_state received but RemotePlayers not found (peer=", peer_id, ")")
+		return
+
+	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
+	if not remote_players:
+		print("[NodeAdapter] ⚠️ player_state received but RemotePlayers cast failed (peer=", peer_id, ")")
+		return
+
+	remote_players.update_remote_player_state(peer_id, position, rotation, velocity)
+	print("[NodeAdapter] 📍 Updated state for peer ", peer_id, ": pos=", position)
+
+func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3) -> void:
+	"""Send local player state to server (position, rotation, velocity)"""
+	if ws == null or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		return
+
+	_send_message("player_state", {
+		"position": {"x": position.x, "y": position.y, "z": position.z},
+		"rotation": {"x": rotation.x, "y": rotation.y, "z": rotation.z},
+		"velocity": {"x": velocity.x, "y": velocity.y, "z": velocity.z},
+	})
 
 # Helper method to update server status when we join a room
 func _set_is_server(is_server: bool) -> void:

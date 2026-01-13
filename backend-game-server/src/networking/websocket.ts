@@ -259,6 +259,7 @@ export function setupWebSocket(server: http.Server) {
         case "join_room": {
           // Require authentication for global mode
           if (!session.isAuthenticated) {
+            console.log(`[WebSocket] ❌ join_room: User not authenticated`);
             return send(ws, "error", { reason: "authentication_required" });
           }
 
@@ -268,6 +269,7 @@ export function setupWebSocket(server: http.Server) {
             typeof (msg.data as any).version !== "string" ||
             typeof (msg.data as any).name !== "string"
           ) {
+            console.log(`[WebSocket] ❌ join_room: Invalid data format`);
             return send(ws, "error", { reason: "invalid_join_room" });
           }
 
@@ -275,12 +277,22 @@ export function setupWebSocket(server: http.Server) {
           const version = (msg.data as any).version;
           const playerName = (msg.data as any).name;
 
+          console.log(
+            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`
+          );
+          console.log(
+            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`
+          );
+
           // Check if room exists in memory; if not, try to load from database
           let room = roomManager.getRoom(roomId);
           if (!room) {
             // Room not in memory yet; create it from database info
             const dbRoom = roomRepo.getRoomById(roomId);
             if (!dbRoom) {
+              console.log(
+                `[WebSocket] ❌ join_room: Room ${roomId} not found in database`
+              );
               return send(ws, "error", { reason: "room_not_found" });
             }
             // Create room in memory with info from database
@@ -297,6 +309,9 @@ export function setupWebSocket(server: http.Server) {
 
           const result = roomManager.joinRoom(roomId, version, playerName, ip);
           if ("error" in result) {
+            console.log(
+              `[WebSocket] ❌ join_room: RoomManager error - ${result.error}`
+            );
             return send(ws, "error", { reason: result.error });
           }
           const { room: updatedRoom, peerId } = result;
@@ -345,6 +360,11 @@ export function setupWebSocket(server: http.Server) {
           // Player count already updated by addPlayerSession, no need to update again
 
           const members = roomManager.getRoomMembers(roomId);
+          console.log(
+            `[WebSocket] 👥 Room ${roomId} members:`,
+            members.map((m) => `peer=${m.peerId} name=${m.name}`)
+          );
+
           send(ws, "room_joined", {
             roomId: roomId,
             peerId,
@@ -355,6 +375,10 @@ export function setupWebSocket(server: http.Server) {
             })),
             currentTbw: updatedRoom.currentTbw,
           });
+
+          console.log(
+            `[WebSocket] 📢 Broadcasting peer_joined to room: peerId=${peerId} name=${session.name}`
+          );
           broadcast(
             updatedRoom,
             "peer_joined",
@@ -421,6 +445,29 @@ export function setupWebSocket(server: http.Server) {
             {
               from: session.peerId,
               payload: (msg.data as any)?.payload ?? {},
+            },
+            session.peerId
+          );
+          break;
+        }
+
+        case "player_state": {
+          // Relay player state (position, rotation, velocity) to all other clients
+          if (!session.roomId || session.peerId === null) {
+            return send(ws, "error", { reason: "not_in_room" });
+          }
+          const room = roomManager.getRoom(session.roomId);
+          if (!room) return send(ws, "error", { reason: "room_not_found" });
+
+          const stateData = (msg.data as any) || {};
+          broadcast(
+            room,
+            "player_state",
+            {
+              peerId: session.peerId,
+              position: stateData.position || { x: 0, y: 0, z: 0 },
+              rotation: stateData.rotation || { x: 0, y: 0, z: 0 },
+              velocity: stateData.velocity || { x: 0, y: 0, z: 0 },
             },
             session.peerId
           );

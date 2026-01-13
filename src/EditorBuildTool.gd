@@ -53,23 +53,23 @@ var last_rotation : Vector3 = Vector3.ZERO
 func _ready() -> void:
 	if type == ToolType.EDITOR:
 		init("(empty)", null)
-		property_editor = get_tree().current_scene.get_node("EditorCanvas/LeftPanel/PropertyEditor") 
-		item_chooser = get_tree().current_scene.get_node("EditorCanvas/LeftPanel/ItemChooser") 
+		property_editor = get_tree().current_scene.get_node("EditorCanvas/LeftPanel/PropertyEditor")
+		item_chooser = get_tree().current_scene.get_node("EditorCanvas/LeftPanel/ItemChooser")
 		editor = Global.get_world().get_current_map()
 	else:
 		init("Build Tool", get_parent().get_parent() as RigidPlayer)
 		tool_overlay = get_tree().current_scene.get_node_or_null("GameCanvas/ToolOverlay/BuildTool")
 		property_editor = get_tree().current_scene.get_node("GameCanvas/ToolOverlay/BuildTool/LeftPanel/PropertyEditor")
 		item_chooser = get_tree().current_scene.get_node("GameCanvas/ToolOverlay/BuildTool/LeftPanel/ItemChooser")
-	
+
 	# for when an editable object is hovered
 	select_area.connect("body_entered", _on_body_selected)
 	select_area.connect("area_entered", _on_body_selected)
 	# for when selection leaves body
 	select_area.connect("body_exited", _on_body_deselected)
 	select_area.connect("area_exited", _on_body_deselected)
-	
-	var camera : Camera = get_viewport().get_camera_3d()
+
+	var camera : Camera = get_viewport().get_camera_3d() as Camera
 	property_editor.connect("property_updated", _on_property_updated)
 
 # When something is hovered with the selector in the editor.
@@ -77,8 +77,8 @@ func _on_body_selected(body : Node3D) -> void:
 	# if we are not the authority of this object
 	if !is_multiplayer_authority(): return
 	if _state == States.SELECT: return
-	
-	
+
+
 	var selectable_body : Node3D = null
 	if body is Area3D:
 		# don't select the preview instance
@@ -89,7 +89,7 @@ func _on_body_selected(body : Node3D) -> void:
 		# don't select the preview instance
 		if (body is Brick || body is TBWObject) && body != preview && body != hovered_editable_object:
 			selectable_body = body
-	
+
 	if selectable_body != null:
 		hovered_editable_object = selectable_body
 		# show props for that object
@@ -125,7 +125,7 @@ func _on_property_updated(properties : Dictionary) -> void:
 			if hovered_editable_object is TBWObject || hovered_editable_object is Brick:
 				for property : String in hovered_item_properties.keys():
 					hovered_editable_object.set_property(property, hovered_item_properties[property])
-					
+
 					if type == ToolType.PLAYER:
 						hovered_editable_object.sync_properties.rpc(hovered_editable_object.properties_as_dict())
 		else:
@@ -173,7 +173,7 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 		change_state(States.BUILD)
 		# show select area
 		set_select_area_visible.rpc(true)
-		
+
 		# player specific
 		if type == ToolType.PLAYER:
 			tool_player_owner.high_priority_lock = true
@@ -217,7 +217,7 @@ func _on_item_picked(item_name_internal : String, item_name_display : String = "
 	if item_name_display != "":
 		ui_partner.text = str(item_name_display)
 	item_offset = Vector3.ZERO
-	
+
 	# if this is a building
 	if item_name_internal.split(";").size() > 1:
 		selected_item_name_internal = item_name_internal
@@ -226,14 +226,14 @@ func _on_item_picked(item_name_internal : String, item_name_display : String = "
 		if item_name_display != "":
 			selected_building_path = item_name_display
 		selected_item_properties = {}
-		
+
 		# load preview
 		var lines := _load_selected_building_path_lines()
 		_show_clipboard_preview(lines)
-		
+
 	else:
 		# not a building
-		
+
 		if !SpawnableObjects.objects.has(item_name_internal):
 			return
 		selected_item = SpawnableObjects.objects[item_name_internal]
@@ -253,7 +253,7 @@ func _on_item_picked(item_name_internal : String, item_name_display : String = "
 		preview = inst
 		preview.rotation = last_rotation
 		add_child(inst)
-		
+
 		# set preview-specific parameters ------------
 		# set preview motor side
 		if inst is MotorBrick:
@@ -266,7 +266,7 @@ func _on_item_picked(item_name_internal : String, item_name_display : String = "
 			if selected_item_properties.has("height"):
 				inst.set_property("height", selected_item_properties["height"])
 		# -------------------------------------------
-		
+
 		# disable script
 		inst.set_script(null)
 		# remove collision
@@ -387,7 +387,7 @@ func paste_grabbed() -> void:
 
 func _physics_process(delta : float) -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	if active:
 		var camera := get_viewport().get_camera_3d()
 		var rot_amount : float = 22.5
@@ -414,12 +414,12 @@ func _physics_process(delta : float) -> void:
 					preview.scale -= Vector3(1, 1, 1)
 					preview.scale = clamp(preview.scale, Vector3(1, 1, 1), Vector3(10, 10, 10))
 			preview.rotation = Vector3(snapped(preview.rotation.x, deg_to_rad(22.5)) as float, snapped(preview.rotation.y, deg_to_rad(22.5)) as float, snapped(preview.rotation.z, deg_to_rad(22.5)) as float)
-			last_rotation = preview.rotation 
-		
+			last_rotation = preview.rotation
+
 		if preview != null:
 			preview.visible = true
 			preview.global_position = select_area.global_position + item_offset
-		
+
 		# change states
 		if Input.is_action_just_pressed("editor_select_toggle") && !Global.is_text_focused:
 			match (_state):
@@ -427,7 +427,7 @@ func _physics_process(delta : float) -> void:
 					change_state(States.SELECT)
 				States.SELECT:
 					change_state(States.BUILD)
-		
+
 		# SELECT MODE -----------
 		if _state == States.SELECT:
 			grab_collider.disabled = false
@@ -524,7 +524,7 @@ func _physics_process(delta : float) -> void:
 					if select_area != null:
 						# if there is something where we are trying to place
 						var valid : bool = true
-						
+
 						# if it's trying to place underwater, that's fine
 						for body in select_area.get_overlapping_areas():
 							if body.owner is TBWObject:
@@ -536,15 +536,15 @@ func _physics_process(delta : float) -> void:
 							elif body.owner != preview:
 								valid = false
 								break
-						
+
 						# however if there are any overlapping bodies it's no longer valid
 						for body in select_area.get_overlapping_bodies():
 							if body != preview:
 								valid = false
-						
+
 						# place if valid
 						if valid && selected_item != null:
-							
+
 							# --- is a building ---
 							if selected_item_name_internal.split(";").size() > 1:
 								var lines := _load_selected_building_path_lines()
@@ -552,7 +552,7 @@ func _physics_process(delta : float) -> void:
 									Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
 								else:
 									UIHandler.show_alert("Building not found or corrupt!", 8, false, UIHandler.alert_colour_error)
-							
+
 							# --- object or brick ---
 							else:
 								var inst : Node3D = selected_item.instantiate()
@@ -569,11 +569,11 @@ func _physics_process(delta : float) -> void:
 								else:
 									# match global transform for objects
 									inst.global_transform = preview.global_transform
-								
+
 								if inst is TBWObject || inst is Brick:
 									for property : String in selected_item_properties.keys():
 										inst.set_property(property, selected_item_properties[property])
-								
+
 								# player specific
 								if inst is Brick && type == ToolType.PLAYER:
 									var line : String = ""
@@ -601,7 +601,7 @@ func _load_selected_building_path_lines() -> Array:
 	# if does not exist in user dir, try the built-in dir
 	if load_file == null:
 		load_file = FileAccess.open(str("res://data/building/", selected_building_path), FileAccess.READ)
-	
+
 	if load_file != null:
 		# load building
 		while not load_file.eof_reached():
@@ -630,7 +630,7 @@ func _show_clipboard_preview(lines : Array) -> void:
 				for i in range(new_mesh.get_surface_override_material_count()):
 					new_mesh.set_surface_override_material(i, load("res://data/materials/editor_placement_material.tres") as Material)
 		preview.rotation = last_rotation
-	
+
 # Find the closest Vector3 axis to a normalized vector using dot.
 func find_closest_axis(normalized_vector : Vector3) -> Vector3:
 	var axes : Array[Vector3] = [\
@@ -638,7 +638,7 @@ func find_closest_axis(normalized_vector : Vector3) -> Vector3:
 		Vector3(0, 1, 0),\
 		Vector3(0, 0, 1),\
 	]
-	
+
 	var closest_axis := axes[0]
 	var max_dot : float = -1
 	var signed_max_dot : float = -1
@@ -649,7 +649,7 @@ func find_closest_axis(normalized_vector : Vector3) -> Vector3:
 			max_dot = abs(dot)
 			signed_max_dot = dot
 			closest_axis = a
-	
+
 	if signed_max_dot >= 0:
 		return closest_axis
 	else:

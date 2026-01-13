@@ -111,6 +111,10 @@ var deaths : int = 0
 # -1 when not being used
 var capture_time : int = -1
 
+# State sync for Node.js backend (multiplayer)
+var _state_sync_timer: float = 0.0
+var _state_sync_interval: float = 0.1  # Send state 10 times per second
+
 @onready var fire : Fire = $Fire
 @onready var bubble_particles : GPUParticles3D = $Smoothing/character_model/character/Skeleton3D/NeckAttachment/Bubbles
 @onready var character_model : Node3D = $Smoothing/character_model
@@ -218,12 +222,12 @@ func update_appearance(shirt : int, shirt_texture_base64 : String, hair : int, s
 	var shirt_material : Material = armature.get_node("shirt_shortsleeve").get_surface_override_material(0)
 	var pants_material : Material = armature.get_node("pants").get_surface_override_material(0)
 	var skin_material : Material = armature.get_node("Character_001").get_surface_override_material(0)
-	
+
 	if shirt_colour != null:
 		shirt_material.albedo_color = shirt_colour
 	if pants_colour != null:
 		pants_material.albedo_color = pants_colour
-		# update chat bubble colour as well, 
+		# update chat bubble colour as well,
 		# keep chat panel value below 70 for contrast
 		chat_panel.self_modulate = pants_colour
 		chat_panel.self_modulate.v = clampf(chat_panel.self_modulate.v, 0, 0.27)
@@ -273,7 +277,7 @@ func get_tool_inventory() -> ToolInventory:
 func _server_receive_on_body_entered_from_client(path_to_body : String) -> void:
 	# only run on server, and make sure this request is from owner client
 	if !multiplayer.is_server() || multiplayer.get_remote_sender_id() != get_multiplayer_authority(): return
-	
+
 	var node : Node3D = get_node_or_null(path_to_body)
 	if node != null:
 		_on_body_entered(node)
@@ -286,7 +290,7 @@ func _on_body_entered(body : Node3D) -> void:
 		# stepped on button
 		if body is ButtonBrick:
 			body.stepped.rpc(get_path())
-	
+
 	# stuff handled by the server
 	if multiplayer.is_server():
 		# trip when hit by something fast, unless we're standing on it
@@ -345,14 +349,14 @@ func _receive_server_health(new : int, potential_executor_id : int = -1) -> void
 		# flash health on damage
 		if new < health:
 			health_bar.get_node("AnimationPlayer").play("flash_health")
-		
+
 		health = new
 		if potential_executor_id != -1:
 			# set executing player (for camera lockon)
 			executing_player = Global.get_world().get_node_or_null(str(potential_executor_id))
 		else:
 			executing_player = null
-		
+
 		# set visual health
 		health_bar.value = get_health()
 		health_bar_text.text = str(JsonHandler.find_entry_in_file("ui/health"), ": ", get_health())
@@ -379,7 +383,7 @@ func set_max_health(new : int) -> void:
 		return
 	# send updated health to clients
 	_receive_server_max_health.rpc(new)
-	
+
 	max_health = new
 	if health > max_health:
 		set_health(max_health)
@@ -388,13 +392,13 @@ func set_max_health(new : int) -> void:
 func set_health(new : int, potential_cause_of_death : int = -1, potential_executor_id : int = -1) -> void:
 	if !multiplayer.is_server():
 		return
-	
+
 	if !invulnerable && !dead:
 		# send updated health to clients
 		_receive_server_health.rpc(new, potential_executor_id)
 		# server will keep track of this
 		health = new
-		
+
 		if health <= 0:
 			# shorter respawn in sandbox
 			respawn_time.wait_time = Global.get_world().get_current_map().respawn_time
@@ -650,12 +654,17 @@ func update_team(new : String) -> void:
 # Update this player's name with a new name.
 @rpc("call_local")
 func update_name(new : String) -> void:
+	print("[RigidPlayer] 👤 Updating player name to: ", new, " for peer ", name)
 	name_label.text = new
 	display_name = new
-	
+
 	# Add the player to the player list.
 	var player_list : Control = get_tree().current_scene.get_node("GameCanvas/PlayerList")
-	player_list.add_player(self)
+	if player_list:
+		player_list.add_player(self)
+		print("[RigidPlayer] ✅ Added player to player list")
+	else:
+		print("[RigidPlayer] ⚠️ PlayerList not found!")
 
 @rpc("any_peer", "call_local", "reliable")
 func set_name_visible(mode : bool) -> void:
@@ -670,14 +679,33 @@ func set_name_visible(mode : bool) -> void:
 # Update peers with new name and team info on join.
 @rpc("call_local", "reliable")
 func update_info(_who : int, to_connected_peer : bool = false) -> void:
+	# Check if using Node backend (no RPC, so call functions directly)
+	var using_node_backend: bool = false
+	var main_scene: Node = get_tree().root.get_child(0)
+	if main_scene and main_scene.has_meta("node_adapter"):
+		using_node_backend = true
+
 	# If updating info to all other peers
 	if !to_connected_peer:
-		update_team.rpc(team)
-		update_name.rpc(Global.display_name)
+		if using_node_backend:
+			# For Node backend, call functions directly instead of RPC
+			update_team(team)
+			update_name(Global.display_name)
+		else:
+			# For ENet backend, use RPC
+			update_team.rpc(team)
+			update_name.rpc(Global.display_name)
 	# If updating info to only a specific (usually joined) peer
 	else:
-		update_team.rpc_id(_who, team)
-		update_name.rpc_id(_who, Global.display_name)
+		if using_node_backend:
+			# For Node backend, no RPC to specific peer, just update directly
+			update_team(team)
+			update_name(Global.display_name)
+		else:
+			# For ENet backend, use RPC
+			update_team.rpc_id(_who, team)
+			update_name.rpc_id(_who, Global.display_name)
+
 	change_appearance()
 	# server handles kills and deaths
 	if multiplayer.is_server():
@@ -685,10 +713,12 @@ func update_info(_who : int, to_connected_peer : bool = false) -> void:
 		update_deaths(deaths)
 
 func set_camera(new : Camera3D) -> void:
+	if new == null:
+		return
 	camera = new
-	if !camera.is_connected("camera_mode_changed", _on_camera_mode_changed):
-		camera.connect("camera_mode_changed", _on_camera_mode_changed)
 	if camera is Camera:
+		if !camera.is_connected("camera_mode_changed", _on_camera_mode_changed):
+			camera.connect("camera_mode_changed", _on_camera_mode_changed)
 		camera.set_camera_mode(Camera.CameraMode.FREE)
 		camera.set_target(target, false)
 
@@ -712,10 +742,49 @@ func _ready() -> void:
 			# keep clients in stasis until they are connected
 			global_position = Vector3(0, world.get_current_map().death_limit_high - 5, 0)
 			freeze = true
-		# only execute on yourself
-		if !is_multiplayer_authority():
-			#freeze = true
+
+		# Determine if this is the local player
+		# For Node backend: check if player's name (peer_id) matches any known local identifier
+		var is_local_player: bool = false
+
+		# Try Node backend adapter first - look for it multiple ways
+		var adapter: MultiplayerNodeAdapter = null
+
+		# Method 1: Check metadata on root scene
+		var root: Node = get_tree().root
+		if root.has_meta("node_adapter"):
+			adapter = root.get_meta("node_adapter")
+
+		# Method 2: Check all children of root for Main scene with metadata
+		if not adapter:
+			for child: Node in root.get_children():
+				if child.has_meta("node_adapter"):
+					adapter = child.get_meta("node_adapter")
+					break
+
+		# Method 3: Try to find Main scene by name
+		if not adapter:
+			var main_scene: Node = root.find_child("Main", true, false)
+			if main_scene and main_scene.has_meta("node_adapter"):
+				adapter = main_scene.get_meta("node_adapter")
+
+		# Try Node backend if we found adapter
+		if adapter:
+			var my_peer_id: int = int(name)
+			var adapter_peer_id: int = adapter.get_unique_peer_id()
+			is_local_player = my_peer_id == adapter_peer_id
+			print("[RigidPlayer] 🎯 _ready() authority check: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id, " is_local=", is_local_player)
+
+		# Fallback to standard multiplayer authority check
+		if not is_local_player:
+			is_local_player = is_multiplayer_authority()
+			print("[RigidPlayer] 🎯 _ready() fallback authority: ", is_local_player)
+
+		# only execute on local player
+		if not is_local_player:
+			print("[RigidPlayer] 🚫 Not local player, skipping initialization")
 			return
+
 		get_tool_inventory().reset()
 		set_camera(get_viewport().get_camera_3d())
 		connect("body_entered", _on_body_entered)
@@ -734,16 +803,35 @@ func _ready() -> void:
 		# in case we were not present on client when server sent
 		# protect spawn call
 		_receive_server_protect_spawn(3.5, false)
-		
+
 		# hide loading screen (set in main on server join)
 		Global.get_world().set_loading_canvas_visiblity(false)
 
 func _on_tbw_loaded() -> void:
+	# Check if using Node backend
+	var using_node_backend: bool = false
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		using_node_backend = true
+	else:
+		for child in root.get_children():
+			if child.has_meta("node_adapter"):
+				using_node_backend = true
+				break
+
 	# set default spawns
 	respawn_time.wait_time = Global.get_world().get_current_map().respawn_time
-	set_spawns.rpc_id(get_multiplayer_authority(), world.get_spawnpoint_for_team(team))
-	if !(Global.get_world().get_current_map() is Editor):
-		go_to_spawn.rpc_id(get_multiplayer_authority())
+
+	if using_node_backend:
+		# For Node backend, call functions directly (no RPC)
+		set_spawns(world.get_spawnpoint_for_team(team))
+		if !(Global.get_world().get_current_map() is Editor):
+			go_to_spawn()
+	else:
+		# For ENet backend, use RPC calls
+		set_spawns.rpc_id(get_multiplayer_authority(), world.get_spawnpoint_for_team(team))
+		if !(Global.get_world().get_current_map() is Editor):
+			go_to_spawn.rpc_id(get_multiplayer_authority())
 
 @rpc("any_peer", "call_local")
 func set_lifter_particles(mode : bool) -> void:
@@ -753,8 +841,52 @@ func _physics_process(delta : float) -> void:
 	# spawned dummies check idle (for menu animation)
 	if spawn_as_dummy:
 		check_idle()
-	
-	if !is_multiplayer_authority(): return
+
+	# Determine if this is the local player (for input processing)
+	var is_local_player: bool = false
+
+	# Try Node backend adapter first - look for it multiple ways
+	var adapter: MultiplayerNodeAdapter = null
+
+	# Method 1: Check metadata on root scene
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		adapter = root.get_meta("node_adapter")
+
+	# Method 2: Check all children of root for Main scene with metadata
+	if not adapter:
+		for child in root.get_children():
+			if child.has_meta("node_adapter"):
+				adapter = child.get_meta("node_adapter")
+				break
+
+	# Method 3: Try to find Main scene by name
+	if not adapter:
+		var main_scene: Node = root.find_child("Main", true, false)
+		if main_scene and main_scene.has_meta("node_adapter"):
+			adapter = main_scene.get_meta("node_adapter")
+
+	# Try Node backend if we found adapter
+	if adapter:
+		var my_peer_id: int = int(name)
+		var adapter_peer_id: int = adapter.get_unique_peer_id()
+		is_local_player = my_peer_id == adapter_peer_id
+		print("[RigidPlayer] 🎮 Authority check: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id, " is_local=", is_local_player)
+	else:
+		# Fallback to standard multiplayer authority check
+		is_local_player = is_multiplayer_authority()
+		print("[RigidPlayer] 🎮 Using fallback authority: ", is_local_player)
+
+	if not is_local_player:
+		return
+
+	# Send player state to server for multiplayer (every ~0.1s)
+	if not spawn_as_dummy:
+		_state_sync_timer += delta
+		if _state_sync_timer >= _state_sync_interval:
+			_state_sync_timer = 0.0
+			_send_player_state_to_server()
+
 	# Idle animations
 	# reset idle time when clicking, ex. using tools
 	if Input.is_action_pressed("click"):
@@ -779,7 +911,7 @@ func _physics_process(delta : float) -> void:
 					rotation.y = lerp_angle(rotation.y, atan2(linear_velocity.x, linear_velocity.z), delta * 12)
 			elif camera.get_camera_mode() == Camera.CameraMode.AIM:
 				rotation.y = camera.rotation.y + PI
-	
+
 	if _state == IN_SEAT:
 		if seat_occupying is MotorSeat:
 			# set player's position and rotation to that of the seat
@@ -790,7 +922,7 @@ func _physics_process(delta : float) -> void:
 			global_rotation = seat_occupying.global_rotation
 			translate_object_local(Vector3(0, -0.7, 0))
 			rotate_object_local(Vector3.UP, deg_to_rad(180))
-	
+
 var idle_time : int = 0
 var idle_max : int = 300
 func check_idle() -> void:
@@ -809,6 +941,9 @@ func play_idle_animation() -> void:
 	animator.set("parameters/IdleOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 
 func play_jump_particles() -> void:
+	if jump_particles == null:
+		push_error("JumpParticles.tscn failed to load")
+		return
 	var jump_particles_i : GPUParticles3D = jump_particles.instantiate()
 	add_child(jump_particles_i)
 	jump_particles_i.emitting = true
@@ -827,15 +962,15 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 		var is_on_ground := false
 		if ground_detect.has_overlapping_bodies():
 			is_on_ground = true
-		
+
 		if camera == null:
 			camera = get_viewport().get_camera_3d()
-		
+
 		# only captured mouse gets move dir
 		var move_direction := Vector3.ZERO
 		if !Input.get_mouse_mode() == Input.MOUSE_MODE_VISIBLE:
 			move_direction = get_movement_direction()
-		
+
 		var grounded_on_standing_object : bool = false
 		# check if standing on something
 		if ground_detect.has_overlapping_bodies() && _state != DEAD && _state != RESPAWN:
@@ -866,7 +1001,7 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 				global_position += (influence_pos.global_position - standing_on_object_last_pos) * standing_influence
 			if grounded_on_standing_object:
 				standing_on_object_last_pos = global_position
-		
+
 		match _state:
 			IDLE:
 				var adj_decel_multiplier := decel_multiplier
@@ -920,12 +1055,15 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 					# only on authority client
 					# 140deg change
 					if last_move_direction.angle_to(move_direction) > 2.443:
-						var run_particles_i : GPUParticles3D = run_particles.instantiate()
-						# so that rotation does not inherit character's rotation
-						get_tree().current_scene.add_child(run_particles_i)
-						run_particles_i.global_rotation.y = atan2(state.linear_velocity.x, state.linear_velocity.z)
-						run_particles_i.global_position = Vector3(global_position.x, global_position.y + 0.2, global_position.z)
-						run_particles_i.emitting = true
+						if run_particles == null:
+							push_error("RunParticles.tscn failed to load")
+						else:
+							var run_particles_i : GPUParticles3D = run_particles.instantiate()
+							# so that rotation does not inherit character's rotation
+							get_tree().current_scene.add_child(run_particles_i)
+							run_particles_i.global_rotation.y = atan2(state.linear_velocity.x, state.linear_velocity.z)
+							run_particles_i.global_position = Vector3(global_position.x, global_position.y + 0.2, global_position.z)
+							run_particles_i.emitting = true
 					last_move_direction = move_direction
 				else:
 					# change to idle when locked
@@ -1080,7 +1218,7 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 				# limit speed unless we are facing a different direction for turning
 				if state.linear_velocity.length() < max_speed * mult:
 					apply_force(dir * 25, Vector3.ZERO)
-			TRIPPED:	
+			TRIPPED:
 				pass
 			IN_SEAT:
 				if seat_occupying is MotorSeat && !locked:
@@ -1119,7 +1257,7 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 				character_model.rotation.x = lerp_angle(character_model.rotation.x, atan2(linear_velocity.y, Vector2(linear_velocity.z, linear_velocity.x).length()) - 0.56, 0.15)
 				pass
 		lateral_velocity = Vector3(linear_velocity.x, 0, linear_velocity.z)
-	
+
 	# handle teleport requests
 	if teleport_requested:
 		set_standing_on_object_rpc.rpc("null")
@@ -1130,7 +1268,7 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 		teleport_requested = false
 		freeze = false
 		emit_signal("teleported")
-	
+
 	# handle out of map ( runs outside auth check )
 	if multiplayer.is_server():
 		if !invulnerable:
@@ -1142,7 +1280,7 @@ func set_standing_on_object_rpc(what_path : String) -> void:
 	# if this change state request is not from the server or the owner client, return
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != get_multiplayer_authority():
 		return
-	
+
 	if what_path == "null":
 		standing_on_object = null
 	else:
@@ -1202,32 +1340,32 @@ func change_state(state : int) -> void:
 	if !is_multiplayer_authority(): return
 	# reset idle timer
 	idle_time = 0
-	
+
 	# if we are dead, only allow change state to respawn (or dummy)
 	# when respawning, only change state to idle
 	# can't be tripped when swimming
 	if (_state == DEAD && state != RESPAWN && state != DUMMY) || (_state == RESPAWN && state != IDLE) || ((_state == SWIMMING || _state == SWIMMING_IDLE) && state == TRIPPED):
 		return
-	
+
 	# trip invincibility timer
 	if (Time.get_ticks_msec() - time_last_tripped) < 1000 && state == TRIPPED:
 		return
-	
+
 	# dummies can only change to idle default state
 	if (_state == DUMMY) && (state != IDLE):
 		return
-	
+
 	# convert tripped state to idle state when invulnerable
 	if (state == TRIPPED && invulnerable == true):
 		state = IDLE
-	
+
 	if _state != TRIPPED || (_state == TRIPPED && (state == SWIMMING || state == SWIMMING_IDLE)):
 		lock_rotation = true
 		# disable dizzy stars visual effect
 		$Smoothing/dizzy_stars.visible = false
 		$Smoothing/dizzy_stars/AnimationPlayer.stop()
 		rotation = Vector3(0, rotation.y, 0)
-	
+
 	# reset external propulsion (unless going from slide into jump while extinguishing, to avoid 'hiccup')
 	external_propulsion = false
 	if (_state == SLIDE && state == AIR):
@@ -1235,7 +1373,7 @@ func change_state(state : int) -> void:
 			var st : ShootTool = get_tool_inventory().get_active_tool()
 			if st._shoot_type == ShootTool.ShootType.WATER && st.firing:
 				external_propulsion = true
-	
+
 	# set to new state
 	if _state != state:
 		_state = state
@@ -1245,82 +1383,82 @@ func change_state(state : int) -> void:
 func enter_state() -> void:
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	# DEBUG
 	if debug_menu.visible:
 		UIHandler.show_toast(str(states_as_names[_state], ": AD ", air_duration, ": AFJ", air_from_jump), 3)
-	
+
 	# reset blend states
 	animator["parameters/BlendSit/blend_amount"] = 0
-	
+
 	if _state != DUMMY:
 		animator["parameters/BlendOutroPose/blend_amount"] = 0
 		freeze = false
-	
+
 	animator.set("parameters/IdleOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
-	
+
 	if _state != AIR:
 		air_from_jump = false
 		if _state != DIVE && _state != EXIT_SEAT:
 			var tween : Tween = get_tree().create_tween().set_parallel(true)
 			tween.tween_property(animator, "parameters/BlendJump/blend_amount", 0.0, 0.1)
 			tween.tween_property(animator, "parameters/BlendDive/blend_amount", 0.0, 0.3)
-	
+
 	# reset collider height
 	if _state != SLIDE && _state != SLIDE_BACK && _state != ROLL:
 		set_collider_short(false)
 	else:
 		set_collider_short(true)
-	
+
 	if _state != AIR && _state != HIGH_JUMP:
 		air_duration = 0
-	
+
 	if _state != HIGH_JUMP:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendHighJump/blend_amount", 0.0, 0.1)
-	
+
 	if _state != SLIDE:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendSlide/blend_amount", 0.0, 0.2)
-		
+
 	if _state != SLIDE_BACK:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendSlideBack/blend_amount", 0.0, 0.2)
-	
+
 	if _state != ROLL:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendRoll/blend_amount", 0.0, 0.2)
-	
+
 	if _state != ON_LEDGE:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendOnLedge/blend_amount", 0.0, 0.2)
-	
+
 	if _state != DEAD:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendDead/blend_amount", 0.0, 0.3)
-	
+
 	# lifter handling
 	if _state != AIR && _state != DIVE && _state != HIGH_JUMP:
 		in_air_from_lifter = false
 		sparkle_audio_anim.play("fadeout")
-	
+
 	# only reset last_hit_by when the player walks on ground
 	if _state == RUN || _state == RESPAWN:
 		set_last_hit_by_id.rpc(-1)
-	
+
 	# reset from states that change the character's model rotation
 	if _state != SWIMMING && _state != SWIMMING_IDLE && _state != SWIMMING_DASH && _state != SLIDE && _state != SLIDE_BACK:
 		character_model.rotation_degrees = Vector3(0, -180, 0)
-	
+
 	# reset swimming animation
 	if _state != SWIMMING && _state != SWIMMING_IDLE && _state != SWIMMING_DASH:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendSwim/blend_amount", -1.0, 0.5)
-	
+
 	if _state != SWIMMING_DASH:
 		var tween : Tween = get_tree().create_tween().set_parallel(true)
 		tween.tween_property(animator, "parameters/BlendSwimDash/blend_amount", 0.0, 0.2)
-	
+
 	# tools handling
 	if _state == DEAD || _state == TRIPPED || _state == DUMMY || _state == ROLL:
 		# disable tools
@@ -1331,7 +1469,7 @@ func enter_state() -> void:
 		# re-enable tools
 		if get_tool_inventory() != null:
 			get_tool_inventory().set_disabled(false)
-	
+
 	match _state:
 		IDLE:
 			# re-enable collider
@@ -1480,7 +1618,7 @@ func enter_state() -> void:
 			if camera is Camera:
 				death_camera_mode = camera.get_camera_mode()
 				if executing_player != null:
-					camera.set_target(executing_player.target)
+					camera.set_target(executing_player.target as Node)
 				camera.locked = true
 				camera.set_camera_mode(Camera.CameraMode.TRACK)
 		RESPAWN:
@@ -1557,27 +1695,51 @@ func enter_state() -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func go_to_spawn() -> void:
+	# Check if using Node backend (no RPC, so skip remote_sender_id check)
+	var using_node_backend: bool = false
+	var main_scene: Node = get_tree().root.get_child(0)
+	if main_scene and main_scene.has_meta("node_adapter"):
+		using_node_backend = true
+
 	# if this go to spawn request is not from the server or run locally, return
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
-		return
+	# (Skip this check for Node backend since we don't use RPC)
+	if not using_node_backend:
+		if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
+			return
+
 	# find team spawns
+	if spawns.is_empty():
+		print("[RigidPlayer] ⚠️ No spawns available, cannot go to spawn")
+		return
+
 	var spawn : Vector3 = Vector3.ZERO
 	spawn = spawns[randi() % spawns.size()]
+	print("[RigidPlayer] 📍 Going to spawn at: ", spawn)
 	teleport(spawn)
 
 # run on client from server
 @rpc("any_peer", "call_local", "reliable")
 func set_spawns(new_spawns : Array) -> void:
+	# Check if using Node backend (no RPC, so skip remote_sender_id check)
+	var using_node_backend: bool = false
+	var main_scene: Node = get_tree().root.get_child(0)
+	if main_scene and main_scene.has_meta("node_adapter"):
+		using_node_backend = true
+
 	# if this go to spawn request is not from the server or run locally, return
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != get_multiplayer_authority() && multiplayer.get_remote_sender_id() != 0:
-		return
+	# (Skip this check for Node backend since we don't use RPC)
+	if not using_node_backend:
+		if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != get_multiplayer_authority() && multiplayer.get_remote_sender_id() != 0:
+			return
+
 	spawns = new_spawns
+	print("[RigidPlayer] 📍 Spawns set to: ", spawns.size(), " spawn points")
 
 # replicates states on non-authority clients, mainly for animation reasons
 @rpc("call_remote", "reliable")
 func change_state_non_authority(state : int) -> void:
 	_state = state
-	
+
 	if _state != DUMMY:
 		animator["parameters/BlendOutroPose/blend_amount"] = 0
 	if _state != AIR:
@@ -1614,7 +1776,7 @@ func change_state_non_authority(state : int) -> void:
 		tween.tween_property(animator, "parameters/BlendOnLedge/blend_amount", 0.0, 0.2)
 	# reset idle animation
 	animator.set("parameters/IdleOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
-	
+
 	match _state:
 		IDLE:
 			# dizzy stars visual effect
@@ -1702,12 +1864,12 @@ func get_movement_direction() -> Vector3:
 	# only execute on yourself
 	if !is_multiplayer_authority(): return Vector3.ZERO
 	var dir := Vector3.ZERO
-	
+
 	dir.x = Input.get_action_strength("right") - Input.get_action_strength("left")
 	dir.z = Input.get_action_strength("back") - Input.get_action_strength("forward")
 	if camera != null:
 		dir = dir.rotated(Vector3.UP, camera.rotation.y).normalized()
-	
+
 	return dir
 
 func set_player_collider(new : bool) -> void:
@@ -1740,7 +1902,7 @@ func explode(explosion_position : Vector3, from_whom : int = 1, _explosion_force
 		if get_health() > 0:
 			change_state.rpc_id(get_multiplayer_authority(), TRIPPED)
 			light_fire.rpc(from_whom)
-	
+
 	# run on authority (client who exploded)
 	if !is_multiplayer_authority(): return
 	# check if holding flamethrower, if so set proper cause of death
@@ -1886,3 +2048,35 @@ func despawn() -> void:
 	get_tool_inventory().delete_all_tools()
 	Global.get_world().remove_player_from_list(self)
 	queue_free()
+func _send_player_state_to_server() -> void:
+	"""Send local player state to server for multiplayer sync"""
+	# Try to find the MultiplayerNodeAdapter using multiple methods
+	var adapter: MultiplayerNodeAdapter = null
+
+	# Method 1: Check metadata on root scene
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		adapter = root.get_meta("node_adapter") as MultiplayerNodeAdapter
+
+	# Method 2: Check all children of root for Main scene with metadata
+	if not adapter:
+		for child in root.get_children():
+			if child.has_meta("node_adapter"):
+				adapter = child.get_meta("node_adapter") as MultiplayerNodeAdapter
+				break
+
+	# Method 3: Try to find Main scene by name and access node_peer property
+	if not adapter:
+		var main_scene: Node = root.find_child("Main", true, false)
+		if main_scene and "node_peer" in main_scene:
+			adapter = main_scene.get("node_peer") as MultiplayerNodeAdapter
+
+	# Method 4: Direct root access
+	if not adapter:
+		var main_scene: Node = root.get_child(0)
+		if main_scene and "node_peer" in main_scene:
+			adapter = main_scene.get("node_peer") as MultiplayerNodeAdapter
+
+	# Send state if we found adapter
+	if adapter and adapter.has_method("send_player_state"):
+		adapter.send_player_state(global_position, global_rotation, linear_velocity)

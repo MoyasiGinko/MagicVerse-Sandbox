@@ -106,9 +106,7 @@ func _ready() -> void:
 
 	# Load saved authentication token and user data
 	auth_manager.load_saved_token()
-	print("[Main] Auth token loaded: ", Global.auth_token != "")
-	print("[Main] Authenticated user: ", Global.player_username)
-	print("[Main] Display name: ", Global.player_display_name)
+	print("[Main] ✅ Initialization complete")
 
 	# ask user before quitting (command and Q are buttons that may both
 	# be used at the same time)
@@ -837,18 +835,7 @@ func _setup_node_backend_host() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _setup_node_backend_client(room_code: String = "", map_name: String = "", gamemode: String = "") -> void:
-	print("[Main] === SETTING UP NODE BACKEND AS CLIENT ===")
-	print("[Main] Room code: ", room_code)
-	print("[Main] Map name: ", map_name)
-	print("[Main] Gamemode: ", gamemode)
-	print("[Main] Server URL: ", node_server_url)
-	print("[Main] Player name: ", Global.display_name)
-	print("[Main] Auth token: ", Global.auth_token.substr(0, 20) if Global.auth_token.length() > 20 else "SHORT_TOKEN")
-
-	# Store the selected gamemode for later use
-	if gamemode != "":
-		Global.set_meta("selected_gamemode", gamemode)
-		print("[Main] 💾 Stored selected gamemode: ", gamemode)
+	print("[Main] 🔗 Joining room: ", room_code, " on server: ", node_server_url)
 
 	# Check if adapter already exists and clean it up
 	if node_peer != null and is_instance_valid(node_peer):
@@ -867,12 +854,15 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 	print("[Main] 🔨 Creating MultiplayerNodeAdapter...")
 	node_peer = MultiplayerNodeAdapter.new()
 	add_child(node_peer)
+	# Store adapter in main scene metadata so players can access it
+	get_tree().root.get_child(0).set_meta("node_adapter", node_peer)
 	print("[Main] ✅ MultiplayerNodeAdapter created and added")
 
 	# Connect adapter signals
 	print("[Main] 🔗 Connecting adapter signals...")
 	node_peer.room_joined.connect(_on_room_joined)
 	node_peer.connection_failed.connect(_on_connection_failed)
+	node_peer.peer_joined_with_name.connect(_on_peer_joined_with_name)
 	print("[Main] ✅ Signals connected")
 
 	# Connect to Node backend
@@ -957,9 +947,22 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 	print("[Main] 👤 Spawning player character...")
 	var player : RigidPlayer = PLAYER.instantiate()
 	player.name = str(node_peer.get_unique_peer_id())
+	# Set multiplayer authority so the player knows it's theirs
+	player.set_multiplayer_authority(node_peer.get_unique_peer_id())
 	$World.add_child(player, true)
 	Global.connected_to_server = true
 	print("[Main] ✅ Player spawned with peer_id: ", node_peer.get_unique_peer_id())
+
+	# Add RemotePlayers manager for multiplayer avatars
+	print("[Main] 👥 Adding RemotePlayers manager...")
+	var remote_players: RemotePlayers = RemotePlayers.new()
+	remote_players.name = "RemotePlayers"
+	$World.add_child(remote_players as Node)
+	print("[Main] ✅ RemotePlayers manager added")
+
+	# Spawn any existing members that joined before RemotePlayers was ready
+	if node_peer:
+		node_peer.spawn_pending_members()
 
 	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
 	get_tree().current_scene.get_node("GameCanvas").visible = true
@@ -973,6 +976,30 @@ func _setup_node_backend_client(room_code: String = "", map_name: String = "", g
 	await $World.tbw_loaded
 	print("[Main] ✅ World fully loaded, gamemodes ready!")
 	_select_stored_gamemode()
+
+	# For Node backend: If we're the host, auto-start the gamemode
+	if node_peer and node_peer.is_server():
+		print("[Main] 🎮 Host detected - auto-starting gamemode...")
+		await get_tree().create_timer(1.0).timeout  # Wait for gamemode selection
+		_start_gamemode_for_node_backend()
+
+func _start_gamemode_for_node_backend() -> void:
+	"""Start the gamemode without RPC (for Node backend hosts)"""
+	if not Global.has_meta("selected_gamemode"):
+		print("[Main] ⚠️ No gamemode to start")
+		return
+
+	var selected_gamemode_name: String = Global.get_meta("selected_gamemode")
+	print("[Main] 🚀 Starting gamemode: ", selected_gamemode_name)
+
+	# Find the gamemode in the world's list
+	for gm: Gamemode in $World.gamemode_list:
+		if gm.gamemode_name == selected_gamemode_name:
+			print("[Main] ✅ Found gamemode, calling run()")
+			gm.run()
+			return
+
+	print("[Main] ❌ Gamemode '", selected_gamemode_name, "' not found in world list")
 
 func _select_stored_gamemode() -> void:
 	"""Select the gamemode that was chosen during room creation"""
@@ -1053,6 +1080,34 @@ func _on_room_created(room_id: String) -> void:
 func _on_room_joined(peer_id: int, room_id: String) -> void:
 	print("Joined room ", room_id, " as peer ", peer_id)
 	UIHandler.show_alert("Connected as peer " + str(peer_id), 4, false, UIHandler.alert_colour_player)
+
+	# Populate player list from server room data
+	if node_peer:
+		var all_peers: Array = node_peer.get_all_peers_with_names()
+		var player_list: Control = get_tree().current_scene.get_node_or_null("GameCanvas/PlayerList")
+
+		if player_list and player_list.has_method("add_player_from_server"):
+			print("[Main] 👥 Populating player list with ", all_peers.size(), " players")
+			for peer_data: Variant in all_peers:
+				if typeof(peer_data) == TYPE_DICTIONARY:
+					var peer_dict: Dictionary = peer_data as Dictionary
+					var peer_id_val: int = peer_dict.get("peerId", 0) as int
+					var peer_name: String = peer_dict.get("name", "Unknown") as String
+					player_list.add_player_from_server(peer_id_val, peer_name, 0)
+			print("[Main] ✅ Player list populated")
+		else:
+			print("[Main] ⚠️ PlayerList not found or missing method")
+
+func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
+	"""Called when a new peer joins the room after we're already in"""
+	print("[Main] 👤 New peer joined: ", peer_id, " name=", peer_name)
+
+	var player_list: Control = get_tree().current_scene.get_node_or_null("GameCanvas/PlayerList")
+	if player_list and player_list.has_method("add_player_from_server"):
+		player_list.add_player_from_server(peer_id, peer_name, 0)
+		print("[Main] ✅ Added new peer to player list")
+	else:
+		print("[Main] ⚠️ PlayerList not found")
 
 func _on_connection_failed(reason: String) -> void:
 	push_error("Node backend connection failed: " + reason)

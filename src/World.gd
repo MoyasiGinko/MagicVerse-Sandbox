@@ -357,12 +357,17 @@ func show_tbw_switch_alert(name_from : String, world_name : String) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func set_loading_canvas_visiblity(mode : bool) -> void:
+	if loading_canvas == null:
+		return
 	loading_canvas.visible = mode
 
 @rpc("authority", "call_local", "reliable")
 func set_loading_canvas_text(text : String) -> void:
+	if loading_canvas == null:
+		return
 	var loading_text : Label = loading_canvas.get_node("Panel/Label")
-	loading_text.text = str(text)
+	if loading_text != null:
+		loading_text.text = str(text)
 
 
 func open_tbw(lines : Array, reset_camera_and_player : bool = true) -> void:

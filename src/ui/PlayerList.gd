@@ -64,17 +64,23 @@ func sort_by_teams() -> void:
 	sorted_nodes.sort_custom(
 		func(a: Node, b: Node) -> bool: return a.get_node("HBoxContainer/Team").text < b.get_node("HBoxContainer/Team").text
 	)
-	
+
 	for node in get_children():
 		remove_child(node)
 	for node in sorted_nodes:
 		add_child(node)
-	
+
 func add_player(player : RigidPlayer) -> void:
 	for l in get_children():
 		# if we're already in the list, dont add
 		if l.name == str(player.name):
 			return
+
+	# Check if player_list_entry scene loaded correctly
+	if player_list_entry == null:
+		push_error("PlayerListEntry.tscn failed to load")
+		return
+
 	# otherwise, continue
 	var player_list_entry_i : Control = player_list_entry.instantiate()
 	var player_label : Label = player_list_entry_i.get_node("HBoxContainer/Label")
@@ -102,6 +108,54 @@ func add_player(player : RigidPlayer) -> void:
 		player_list_entry_i.get_node("HBoxContainer/You").visible = true
 	add_child(player_list_entry_i)
 	sort_by_teams()
+
+# Add player from server room data (for Node backend multiplayer)
+func add_player_from_server(peer_id: int, player_name: String, team: int = 0) -> void:
+	print("[PlayerList] 👥 Adding player from server: peer_id=", peer_id, " name=", player_name)
+
+	for l in get_children():
+		# if we're already in the list, dont add
+		if l.name == str(peer_id):
+			print("[PlayerList] ⚠️ Player already in list, skipping")
+			return
+
+	# Check if player_list_entry scene loaded correctly
+	if player_list_entry == null:
+		push_error("PlayerListEntry.tscn failed to load")
+		return
+
+	# Create new player list entry
+	var player_list_entry_i : Control = player_list_entry.instantiate()
+	var player_label : Label = player_list_entry_i.get_node("HBoxContainer/Label")
+	var player_team : Label = player_list_entry_i.get_node("HBoxContainer/Team")
+	var player_k : Label = player_list_entry_i.get_node("HBoxContainer/K")
+	var player_d : Label = player_list_entry_i.get_node("HBoxContainer/D")
+
+	player_label.text = player_name
+	player_team.text = str(team)
+	if !show_team_names:
+		player_team.visible = false
+	player_k.text = "0"
+	player_d.text = "0"
+
+	# set colour to our team colour.
+	if Global.get_world().get_current_map().get_teams().get_team(str(team)) != null:
+		var team_colour : Color = Global.get_world().get_current_map().get_teams().get_team(str(team)).colour
+		player_list_entry_i.self_modulate = team_colour
+
+	# make the name of the object equal to peer id
+	player_list_entry_i.name = str(peer_id)
+
+	# if peer 1, show the crown (host)
+	if peer_id == 1:
+		player_list_entry_i.get_node("HBoxContainer/Crown").visible = true
+	# show "YOU" tag for ourselves
+	elif player_name == Global.display_name:
+		player_list_entry_i.get_node("HBoxContainer/You").visible = true
+
+	add_child(player_list_entry_i)
+	sort_by_teams()
+	print("[PlayerList] ✅ Player added to list")
 
 func remove_player_by_id(id : int) -> void:
 	remove_player(Global.get_world().get_node_or_null(str(id)) as RigidPlayer)
