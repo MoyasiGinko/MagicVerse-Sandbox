@@ -519,8 +519,8 @@ func _handle_player_state(data: Dictionary) -> void:
 	# For now, we can directly update transform if it's a remote player
 	if player_node is RigidPlayer:
 		var player: RigidPlayer = player_node as RigidPlayer
-		# Only update if this is not the local player
-		if player.get_multiplayer_authority() != get_unique_peer_id():
+		# Only update if this is NOT the local player (use is_local_player flag, not get_multiplayer_authority)
+		if not player.is_local_player:
 			print("[NodeAdapter] 📍 Syncing peer ", peer_id, " position: ", position)
 			# Ensure remote player physics is frozen
 			player.freeze = true

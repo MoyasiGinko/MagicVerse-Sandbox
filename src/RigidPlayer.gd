@@ -125,7 +125,7 @@ var capture_time : int = -1
 
 # State sync for Node.js backend (multiplayer)
 var _state_sync_timer: float = 0.0
-var _state_sync_interval: float = 0.1  # Send state 10 times per second
+var _state_sync_interval: float = 0.05  # Send state 20 times per second for smoother movement
 
 @onready var fire : Fire = $Fire
 @onready var bubble_particles : GPUParticles3D = $Smoothing/character_model/character/Skeleton3D/NeckAttachment/Bubbles
@@ -997,8 +997,6 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 		var move_direction := Vector3.ZERO
 		if !Input.get_mouse_mode() == Input.MOUSE_MODE_VISIBLE:
 			move_direction = get_movement_direction()
-			if move_direction.length() > 0.01:
-				print("[RigidPlayer] 📍 Moving peer ", name, ": direction=", move_direction, " position=", global_position)
 
 		var grounded_on_standing_object : bool = false
 		# check if standing on something

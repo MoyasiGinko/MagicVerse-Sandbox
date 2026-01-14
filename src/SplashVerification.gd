@@ -7,9 +7,9 @@ var status_label: Label
 var loading_label: Label
 
 # Configuration
-const MINIMUM_SPLASH_TIME: float = 10.0  # Minimum time to show splash
+const MINIMUM_SPLASH_TIME: float = 5.0  # Minimum time to show splash
 const BANNER_IMAGE_PATH: String = "res://magicverse-banner2.png"  # Path to your banner image
-const VERIFICATION_TIMEOUT: float = 10.0  # Maximum time to wait for verification
+const VERIFICATION_TIMEOUT: float = 5.0  # Maximum time to wait for verification
 
 var auth_manager: AuthenticationManager = null
 var splash_timer: float = 0.0
