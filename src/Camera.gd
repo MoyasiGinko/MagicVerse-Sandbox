@@ -89,8 +89,13 @@ func set_target(new_target : Node, interpolate := true) -> void:
 			target = Node3D.new()
 			get_tree().current_scene.add_child(target)
 			target.global_position = last_pos
+			print("[Camera] 🎯 Target set to new Node3D at ", last_pos)
 		else:
 			target = new_target
+			# Find the player that owns this target
+			var owner_player: Node = new_target.get_parent().get_parent() if new_target.get_parent() and new_target.get_parent().get_parent() else null
+			var player_name: String = owner_player.name if owner_player else "unknown"
+			print("[Camera] 🎯 Target set to ", new_target.name, " (player: ", player_name, ")")
 
 func set_target_wait_to_player(target_1 : Node, wait_time := 1) -> void:
 	set_target(target_1)
@@ -130,9 +135,9 @@ func _control_camera_rotation(delta : float) -> void:
 	var camera_vec := Vector2.ZERO
 	camera_vec.y = (Input.get_action_strength("camera_down") - Input.get_action_strength("camera_up")) * 0.5
 	camera_vec.x = Input.get_action_strength("camera_right") - Input.get_action_strength("camera_left")
-	
+
 	move_around_target(camera_vec * controller_sensitivity)
-	
+
 	if target != null:
 		if dist_to_hit != null:
 			dist_diff = lerp(dist_diff, dist_to_hit, 0.3)
@@ -147,7 +152,7 @@ func _control_camera_rotation(delta : float) -> void:
 				gimbal.global_position = target.global_position
 				await get_tree().create_timer(0.1).timeout
 				do_interpolate = true
-	
+
 	dist = lerp(float(dist), float(target_dist), 9 * delta)
 
 var dist_to_hit : float = 0.0
@@ -164,14 +169,14 @@ func _process(delta : float) -> void:
 	if _camera_mode == CameraMode.CONTROLLED:
 		if target != null:
 			target.global_position = lerp(target.global_position, controlled_cam_pos, 0.1)
-		
+
 		if Input.is_action_just_pressed("forward") || Input.is_action_just_pressed("back"):
 			controlled_cam_delay.z = 0
 		if Input.is_action_just_pressed("left") || Input.is_action_just_pressed("right"):
 			controlled_cam_delay.x = 0
 		if Input.is_action_just_pressed("jump") || Input.is_action_just_pressed("alt"):
 			controlled_cam_delay.y = 0
-		
+
 		var move_forward : float = 0
 		if controlled_cam_delay.z <= 0 && Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			move_forward = Input.get_action_strength("back") - Input.get_action_strength("forward")
@@ -219,28 +224,28 @@ func _process(delta : float) -> void:
 		controlled_cam_pos += controlled_cam_lateral.normalized() + (move_vertical * Vector3.UP)
 		# snap to grid
 		controlled_cam_pos = controlled_cam_pos.round()
-		
+
 		if controlled_cam_delay.x > 0:
 			controlled_cam_delay.x -= 60 * delta
 		if controlled_cam_delay.y > 0:
 			controlled_cam_delay.y -= 60 * delta
 		if controlled_cam_delay.z > 0:
 			controlled_cam_delay.z -= 60 * delta
-		
+
 		# shorter control time if holding key
 		if Input.is_action_pressed("forward") || Input.is_action_pressed("back") || Input.is_action_pressed("right") || Input.is_action_pressed("left") || Input.is_action_pressed("jump") || Input.is_action_pressed("alt"):
 			held_key_time += delta * 400
 		else:
 			held_key_time = 0
-		
+
 		# swap camera zoom
 		if Input.is_action_just_pressed("zoom_in") && Input.is_action_pressed("control"):
 			target_dist = clamp(target_dist - (target_dist * 0.15), 3, max_dist)
 		elif Input.is_action_just_pressed("zoom_out") && Input.is_action_pressed("control"):
 			target_dist = clamp(target_dist + (target_dist * 0.15), 3, max_dist)
-		
+
 		_control_camera_rotation(delta)
-	
+
 	elif !locked:
 		gimbal.global_rotation = Vector3.ZERO
 		# zoom
@@ -248,7 +253,7 @@ func _process(delta : float) -> void:
 			target_dist = clamp(target_dist - 2, 3, max_dist)
 		elif Input.is_action_just_pressed("zoom_out") && Input.is_action_pressed("control"):
 			target_dist = clamp(target_dist + 2, 3, max_dist)
-		
+
 		# if multithreaded physics, this section FROM HERE
 		# must be moved to physics process
 		# (physics api calls can only be called on physics_process)
@@ -280,9 +285,9 @@ func _process(delta : float) -> void:
 				else:
 					speed_trails.emitting = false
 		# TO HERE
-		
+
 		_control_camera_rotation(delta)
-		
+
 		# Toggle camera modes.
 		if Input.is_action_just_pressed("toggle_camera_mode"):
 			match _camera_mode:
@@ -307,7 +312,7 @@ func get_mouse_pos_3d() -> Dictionary:
 		# collision mask on layer 1(bit1), 2(bit2), 6(bit32)
 		var ray_query := PhysicsRayQueryParameters3D.create(r_origin, r_end, 1|32)
 		var r_array : Dictionary = space_state.intersect_ray(ray_query)
-		
+
 		if r_array:
 			return r_array
 	return {}
@@ -355,18 +360,18 @@ func play_preview_animation(time : float = 10) -> void:
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
 		return
 	get_tree().current_scene.get_node("GameCanvas").visible = false
-	
+
 	var points : Array[CameraPreviewPoint] = []
 	# get points
 	for c : Node in Global.get_world().get_children():
 		if c is CameraPreviewPoint:
 			points.append(c as CameraPreviewPoint)
-	
+
 	# show transition
 	UIHandler.fade_black_transition(1)
 	# wait for full black
 	await get_tree().create_timer(0.5).timeout
-	
+
 	if points.size() > 0:
 		set_camera_mode(CameraMode.FREE)
 		locked = true
@@ -385,7 +390,7 @@ func play_preview_animation(time : float = 10) -> void:
 			UIHandler.fade_black_transition(1)
 			# wait for full black
 			await get_tree().create_timer(0.5).timeout
-	
+
 	# reset cam
 	fov = UserPreferences.camera_fov
 	set_camera_mode(CameraMode.FREE)

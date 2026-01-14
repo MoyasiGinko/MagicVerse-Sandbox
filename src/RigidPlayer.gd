@@ -804,7 +804,9 @@ func _ready() -> void:
 			return
 
 		get_tool_inventory().reset()
-		set_camera(get_viewport().get_camera_3d())
+		var camera_to_set: Camera3D = get_viewport().get_camera_3d()
+		print("[RigidPlayer] 📹 Setting camera for local player ", name, " - camera target will be set to my target node")
+		set_camera(camera_to_set)
 		connect("body_entered", _on_body_entered)
 		multiplayer.connected_to_server.connect(update_info)
 		# when someone connects, broadcast our player info to only them

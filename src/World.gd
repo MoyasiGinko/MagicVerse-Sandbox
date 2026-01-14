@@ -594,16 +594,22 @@ func reset_player_cameras() -> void:
 	# refind node
 	var camera : Camera3D = get_viewport().get_camera_3d()
 	if camera is Camera:
-		var player : RigidPlayer = Global.get_player()
-		if player != null:
-			player.set_camera(camera)
+		# Find the LOCAL player by checking is_local_player flag, not using Global.get_player()
+		for player: RigidPlayer in rigidplayer_list:
+			if player is RigidPlayer and player.is_local_player:
+				print("[World] 🎥 Resetting camera for LOCAL player: ", player.name)
+				player.set_camera(camera)
+				break
 
 @rpc("any_peer", "call_local", "reliable")
 func reset_player_positions() -> void:
-	var player : RigidPlayer = Global.get_player()
-	if player != null:
-		player.change_state(RigidPlayer.IDLE)
-		player.go_to_spawn()
+	# Find the LOCAL player by checking is_local_player flag
+	for player: RigidPlayer in rigidplayer_list:
+		if player is RigidPlayer and player.is_local_player:
+			print("[World] 📍 Resetting position for LOCAL player: ", player.name)
+			player.change_state(RigidPlayer.IDLE)
+			player.go_to_spawn()
+			break
 
 func clear_world() -> void:
 	clear_bricks()
