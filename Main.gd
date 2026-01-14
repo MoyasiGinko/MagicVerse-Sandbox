@@ -781,23 +781,6 @@ func _on_room_joined(peer_id: int, room_id: String) -> void:
 	print("Joined room ", room_id, " as peer ", peer_id)
 	UIHandler.show_alert("Connected as peer " + str(peer_id), 4, false, UIHandler.alert_colour_player)
 
-	# Populate player list from server room data
-	if node_peer:
-		var all_peers: Array = node_peer.get_all_peers_with_names()
-		var player_list: Control = get_tree().current_scene.get_node_or_null("GameCanvas/PlayerList")
-
-		if player_list and player_list.has_method("add_player_from_server"):
-			print("[Main] 👥 Populating player list with ", all_peers.size(), " players")
-			for peer_data: Variant in all_peers:
-				if typeof(peer_data) == TYPE_DICTIONARY:
-					var peer_dict: Dictionary = peer_data as Dictionary
-					var peer_id_val: int = peer_dict.get("peerId", 0) as int
-					var peer_name: String = peer_dict.get("name", "Unknown") as String
-					player_list.add_player_from_server(peer_id_val, peer_name, 0)
-			print("[Main] ✅ Player list populated")
-		else:
-			print("[Main] ⚠️ PlayerList not found or missing method")
-
 func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
 	"""Called when a new peer joins the room after we're already in"""
 	print("[Main] 👤 New peer joined: ", peer_id, " name=", peer_name)
@@ -850,6 +833,8 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 	# Connect adapter signals
 	print("[Main] 🔗 Connecting adapter signals...")
 	node_peer.connection_failed.connect(_on_connection_failed)
+	node_peer.room_joined.connect(_on_room_joined)
+	node_peer.peer_joined_with_name.connect(_on_peer_joined_with_name)
 	print("[Main] ✅ Signals connected")
 
 	# Connect to Node backend
@@ -906,6 +891,8 @@ func _setup_websocket_client(room_code: String) -> void:
 	# Connect adapter signals
 	print("[Main] 🔗 Connecting adapter signals...")
 	node_peer.connection_failed.connect(_on_connection_failed)
+	node_peer.room_joined.connect(_on_room_joined)
+	node_peer.peer_joined_with_name.connect(_on_peer_joined_with_name)
 	print("[Main] ✅ Signals connected")
 
 	# Connect to Node backend
@@ -939,8 +926,10 @@ func _setup_websocket_client(room_code: String) -> void:
 	set_meta("adapter_wrapper", AdapterMultiplayerPeer.new(node_peer))
 	print("[Main] ✅ Adapter wrapper stored")
 
-	# Load world and start game
-	await _load_world_and_start("Frozen Field")
+	# Load world and start game - get map from Global metadata (set by backend in room_joined)
+	var room_map: String = Global.get_meta("current_room_map") if Global.has_meta("current_room_map") else "Frozen Field"
+	print("[Main] 🗺️ Loading room map: ", room_map)
+	await _load_world_and_start(room_map)
 
 func _load_world_and_start(map_name: String) -> void:
 	"""Load world/map for WebSocket multiplayer"""
@@ -971,21 +960,51 @@ func _load_world_and_start(map_name: String) -> void:
 		print("[Main] ✅ Local player spawned")
 		Global.connected_to_server = true
 
-	# Add RemotePlayers manager for other peers
-	print("[Main] 👥 Adding RemotePlayers manager...")
-	var remote_players: RemotePlayers = RemotePlayers.new()
-	remote_players.name = "RemotePlayers"
-	$World.add_child(remote_players as Node)
-	print("[Main] ✅ RemotePlayers manager added")
+	# Spawn any existing room members as RigidPlayers
+	if node_peer and node_peer.room_members.size() > 0:
+		print("[Main] 👥 Spawning existing room members...")
+		for member: Dictionary in node_peer.room_members:
+			var member_peer_id: int = member.get("peerId", -1)
+			var member_name: String = member.get("name", "Unknown")
 
-	# Spawn any pending members (peers that joined before RemotePlayers was ready)
+			# Skip local player
+			if member_peer_id == node_peer.get_unique_peer_id():
+				continue
+
+			print("[Main] 👤 Spawning RigidPlayer for peer: ", member_peer_id, " name: ", member_name)
+			var remote_player: RigidPlayer = PLAYER.instantiate()
+			remote_player.name = str(member_peer_id)
+			remote_player.assigned_player_name = member_name  # Set the remote player's actual name
+			remote_player.set_multiplayer_authority(member_peer_id)
+			$World.add_child(remote_player, true)
+		print("[Main] ✅ Existing members spawned")
+
+	# Spawn any peers that joined before world was ready
 	if node_peer:
+		print("[Main] 🎭 Spawning pending members...")
 		node_peer.spawn_pending_members()
 
 	# Show game UI
 	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
 	get_tree().current_scene.get_node("GameCanvas").visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+	# Populate player list from server room data (after UI is visible)
+	if node_peer:
+		var all_peers: Array = node_peer.get_all_peers_with_names()
+		var player_list: Control = get_tree().current_scene.get_node_or_null("GameCanvas/PlayerList")
+
+		if player_list and player_list.has_method("add_player_from_server"):
+			print("[Main] 👥 Populating player list with ", all_peers.size(), " players")
+			for peer_data: Variant in all_peers:
+				if typeof(peer_data) == TYPE_DICTIONARY:
+					var peer_dict: Dictionary = peer_data as Dictionary
+					var peer_id_val: int = peer_dict.get("peerId", 0) as int
+					var peer_name: String = peer_dict.get("name", "Unknown") as String
+					player_list.add_player_from_server(peer_id_val, peer_name, 0)
+			print("[Main] ✅ Player list populated")
+		else:
+			print("[Main] ⚠️ PlayerList not found or missing method")
 
 func _reset_host_buttons() -> void:
 	host_button.text = "Host server"

@@ -1,54 +1,54 @@
 # RemotePlayers - Manages all remote players in the game world
-# Spawns/despawns RemotePlayer nodes based on WebSocket messages
+# Spawns/despawns RigidPlayer nodes based on WebSocket messages
 
 extends Node3D
 class_name RemotePlayers
 
-var remote_players: Dictionary = {}  # peerId -> RemotePlayer
-var remote_player_scene: GDScript = preload("res://src/RemotePlayer.gd")
+var remote_players: Dictionary = {}  # peerId -> RigidPlayer
+var player_scene: PackedScene = preload("res://data/scene/character/RigidPlayer.tscn")
 
 func _ready() -> void:
-	pass
+	print("[RemotePlayers] Manager initialized")
 
-func spawn_remote_player(peer_id: int, name: String, position: Vector3 = Vector3.ZERO) -> RemotePlayer:
-	"""Spawn a new remote player"""
+func spawn_remote_player(peer_id: int, display_name: String, position: Vector3 = Vector3.ZERO) -> RigidPlayer:
+	"""Spawn a new RigidPlayer for a remote peer"""
 	if peer_id in remote_players:
+		print("[RemotePlayers] ⚠️ Player already exists: peer_id=", peer_id)
 		return remote_players[peer_id]
 
-	print("[RemotePlayers] 👤 Spawned remote player: peer_id=", peer_id, " name=", name)
+	print("[RemotePlayers] 👤 Spawning RigidPlayer for remote peer: peer_id=", peer_id, " name=", display_name)
 
-	# Create RemotePlayer instance
-	var remote_player: RemotePlayer = RemotePlayer.new()
-	remote_player.name = "RemotePlayer_" + str(peer_id)
-	remote_player.peer_id = peer_id
-	remote_player.player_name = name
+	# Instantiate RigidPlayer from scene
+	var player: RigidPlayer = player_scene.instantiate()
+	player.name = str(peer_id)
+	player.set_multiplayer_authority(peer_id)
 
 	# Position in world
-	remote_player.global_position = position
+	player.global_position = position
 
-	# Add to scene
-	add_child(remote_player)
-	remote_players[peer_id] = remote_player
-
-	return remote_player
+	# Add to scene (parent should be World node)
+	var world: Node = get_parent()
+	if world:
+		world.add_child(player, true)
+		remote_players[peer_id] = player
+		print("[RemotePlayers] ✅ RigidPlayer spawned for peer ", peer_id)
+		return player
+	else:
+		push_error("[RemotePlayers] ❌ Could not find World parent!")
+		player.queue_free()
+		return null
 
 func despawn_remote_player(peer_id: int) -> void:
 	"""Remove a remote player from the world"""
 	if peer_id not in remote_players:
 		return
 
+	print("[RemotePlayers] 👋 Despawning player: peer_id=", peer_id)
 	var player: Node = remote_players[peer_id]
 	player.queue_free()
 	remote_players.erase(peer_id)
 
-func update_remote_player_state(peer_id: int, position: Vector3, rotation: Vector3, velocity: Vector3) -> void:
-	"""Update a remote player's position and rotation"""
-	if peer_id not in remote_players:
-		return
-
-	remote_players[peer_id].update_state(position, rotation, velocity)
-
-func get_remote_player(peer_id: int) -> RemotePlayer:
+func get_remote_player(peer_id: int) -> RigidPlayer:
 	"""Get a remote player by peer ID"""
 	return remote_players.get(peer_id)
 

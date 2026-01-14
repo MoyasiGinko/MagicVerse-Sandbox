@@ -72,6 +72,7 @@ enum CauseOfDeath {
 
 var _state : int = IDLE
 var display_name := ""
+var assigned_player_name := ""  # Name assigned from backend for remote players
 var camera : Camera3D = null
 var jump_force := 2.4
 var high_jump_force := 12
@@ -168,6 +169,9 @@ var _state_sync_interval: float = 0.1  # Send state 10 times per second
 @onready var name_label : Label = $Smoothing/SubViewport/CanvasLayer/VBoxContainer/NameLabel
 
 @export var spawn_as_dummy : bool = false
+
+# Multiplayer authority tracking - determines if this player is controlled by this client
+var is_local_player : bool = false
 
 func on_ice() -> bool:
 	if standing_on_object is Brick:
@@ -701,7 +705,9 @@ func update_info(_who : int, to_connected_peer : bool = false) -> void:
 		if using_node_backend:
 			# For Node backend, call functions directly instead of RPC
 			update_team(team)
-			update_name(Global.display_name)
+			# Use assigned name if this is a remote player, otherwise use local display name
+			var name_to_use: String = assigned_player_name if assigned_player_name != "" else Global.display_name
+			update_name(name_to_use)
 		else:
 			# For ENet backend, use RPC
 			update_team.rpc(team)
@@ -711,7 +717,9 @@ func update_info(_who : int, to_connected_peer : bool = false) -> void:
 		if using_node_backend:
 			# For Node backend, no RPC to specific peer, just update directly
 			update_team(team)
-			update_name(Global.display_name)
+			# Use assigned name if this is a remote player, otherwise use local display name
+			var name_to_use: String = assigned_player_name if assigned_player_name != "" else Global.display_name
+			update_name(name_to_use)
 		else:
 			# For ENet backend, use RPC
 			update_team.rpc_id(_who, team)
@@ -756,7 +764,7 @@ func _ready() -> void:
 
 		# Determine if this is the local player
 		# For Node backend: check if player's name (peer_id) matches any known local identifier
-		var is_local_player: bool = false
+		# Note: is_local_player is a class member variable declared at the top of the class
 
 		# Try Node backend adapter first - look for it multiple ways
 		var adapter: MultiplayerNodeAdapter = null
@@ -785,11 +793,10 @@ func _ready() -> void:
 			var adapter_peer_id: int = adapter.get_unique_peer_id()
 			is_local_player = my_peer_id == adapter_peer_id
 			print("[RigidPlayer] 🎯 _ready() authority check: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id, " is_local=", is_local_player)
-
-		# Fallback to standard multiplayer authority check
-		if not is_local_player:
+		else:
+			# Fallback to standard multiplayer authority check only if NO adapter found
 			is_local_player = is_multiplayer_authority()
-			print("[RigidPlayer] 🎯 _ready() fallback authority: ", is_local_player)
+			print("[RigidPlayer] 🎯 _ready() fallback authority (no adapter): ", is_local_player)
 
 		# only execute on local player
 		if not is_local_player:
@@ -854,7 +861,7 @@ func _physics_process(delta : float) -> void:
 		check_idle()
 
 	# Determine if this is the local player (for input processing)
-	var is_local_player: bool = false
+	# Note: is_local_player is a class member variable, we just need to recalculate it each frame
 
 	# Try Node backend adapter first - look for it multiple ways
 	var adapter: MultiplayerNodeAdapter = null
@@ -870,7 +877,7 @@ func _physics_process(delta : float) -> void:
 		for child in root.get_children():
 			if child.has_meta("node_adapter"):
 				adapter = child.get_meta("node_adapter")
-				print("[RigidPlayer] ✅ Found adapter on child: ", child.name)
+				#print("[RigidPlayer] ✅ Found adapter on child: ", child.name)
 				break
 
 	# Method 3: Try to find Main scene by name
@@ -888,7 +895,7 @@ func _physics_process(delta : float) -> void:
 		if not is_local_player:
 			pass  #print("[RigidPlayer] 🎮 FAILED authority: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id)
 	else:
-		# Fallback to standard multiplayer authority check
+		# Fallback to standard multiplayer authority check only if NO adapter found
 		is_local_player = is_multiplayer_authority()
 		if is_local_player:
 			pass  #print("[RigidPlayer] ⚠️ Using fallback authority (no adapter found!): is_local=true")
@@ -975,7 +982,7 @@ var init_velocity := Vector3.ZERO
 # Manages movement
 func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 	# handle movement
-	if is_multiplayer_authority():
+	if is_local_player:
 		# executes on owner only
 		var is_on_ground := false
 		if ground_detect.has_overlapping_bodies():
@@ -988,6 +995,8 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 		var move_direction := Vector3.ZERO
 		if !Input.get_mouse_mode() == Input.MOUSE_MODE_VISIBLE:
 			move_direction = get_movement_direction()
+			if move_direction.length() > 0.01:
+				print("[RigidPlayer] 📍 Moving peer ", name, ": direction=", move_direction, " position=", global_position)
 
 		var grounded_on_standing_object : bool = false
 		# check if standing on something
@@ -1343,7 +1352,7 @@ func trip_by_player(hit_velocity : Vector3) -> void:
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
 		return
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !is_local_player: return
 	change_state(TRIPPED)
 	play_bowling_audio.rpc()
 	await get_tree().physics_frame
@@ -1355,7 +1364,7 @@ func change_state(state : int) -> void:
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
 		return
 	# only execute on client from here on
-	if !is_multiplayer_authority(): return
+	if !is_local_player: return
 	# reset idle timer
 	idle_time = 0
 
@@ -1400,7 +1409,7 @@ func change_state(state : int) -> void:
 # Runs once on new state
 func enter_state() -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !is_local_player: return
 
 	# DEBUG
 	if debug_menu.visible:
@@ -1879,8 +1888,11 @@ func play_bowling_audio() -> void:
 		bowling_audio.play()
 
 func get_movement_direction() -> Vector3:
-	# only execute on yourself
-	if !is_multiplayer_authority(): return Vector3.ZERO
+	# Check if this is the local player using custom adapter
+	if not is_local_player:
+		print("[RigidPlayer] 🚫 get_movement_direction blocked: is_local_player=false for peer ", name)
+		return Vector3.ZERO
+
 	var dir := Vector3.ZERO
 
 	dir.x = Input.get_action_strength("right") - Input.get_action_strength("left")

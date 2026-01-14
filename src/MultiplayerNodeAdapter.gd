@@ -18,7 +18,8 @@ var _room_id: String = ""
 var _connected_peers: PackedInt32Array = []
 var _is_connected: bool = false
 var _is_server: bool = false  # Will be true if this peer is the host
-var _pending_members: Array = []  # Store members received before RemotePlayers exists
+var _pending_members: Array = []  # Store members received before World is ready
+var room_members: Array = []  # Public accessor for room member list
 
 func _init() -> void:
 	ws = WebSocketPeer.new()
@@ -113,11 +114,19 @@ func _handle_room_created(data: Dictionary) -> void:
 func _handle_room_joined(data: Dictionary) -> void:
 	_room_id = data.get("roomId", "")
 	_peer_id = data.get("peerId", 0)
+	# Store map and gamemode from backend - joiners need this to load correct room settings
+	var map_name: String = data.get("mapName", "Frozen Field") as String
+	var gamemode: String = data.get("gamemode", "Deathmatch") as String
+	Global.set_meta("current_room_map", map_name)
+	Global.set_meta("current_room_gamemode", gamemode)
+	Global.set_meta("current_room_id", _room_id)
+	print("[NodeAdapter] 🗺️ Room settings stored: map=", map_name, " gamemode=", gamemode)
 
 	# Backend sends 'members' array with {peerId, name, isHost} objects
 	var members: Array = data.get("members", [])
 	_connected_peers.clear()
-	_pending_members.clear()
+	_pending_members.clear()  # Clear pending - Main.gd will spawn existing members from room_members
+	room_members.clear()
 
 	for member: Variant in members:
 		if typeof(member) == TYPE_DICTIONARY:
@@ -125,7 +134,10 @@ func _handle_room_joined(data: Dictionary) -> void:
 			var peer_id: int = member_dict.get("peerId", 0) as int
 			var peer_name: String = member_dict.get("name", "Unknown") as String
 
-			# Skip self
+			# Add all members to room_members (including self)
+			room_members.append({"peerId": peer_id, "name": peer_name})
+
+			# Skip self for connected_peers
 			if peer_id == _peer_id:
 				continue
 
@@ -133,8 +145,8 @@ func _handle_room_joined(data: Dictionary) -> void:
 			if not _connected_peers.has(peer_id):
 				_connected_peers.append(peer_id)
 
-			# Store member for later spawning (RemotePlayers might not exist yet)
-			_pending_members.append({"peerId": peer_id, "name": peer_name})
+			# DON'T add to pending_members - Main.gd will spawn from room_members
+			# pending_members is only for peers that join AFTER world is loaded
 
 	# Peer 1 is always the host in the Node backend
 	_is_server = (_peer_id == 1)
@@ -336,7 +348,7 @@ func is_backend_connected() -> bool:
 	return _is_connected and ws != null and ws.get_ready_state() == WebSocketPeer.STATE_OPEN
 
 func spawn_pending_members() -> void:
-	"""Spawn all pending members after RemotePlayers manager is ready"""
+	"""Spawn all pending members after World is ready"""
 	if _pending_members.is_empty():
 		print("[NodeAdapter] ⚠️ No pending members to spawn")
 		return
@@ -346,25 +358,27 @@ func spawn_pending_members() -> void:
 		print("[NodeAdapter] ❌ World not found, cannot spawn pending members")
 		return
 
-	if not world.has_node("RemotePlayers"):
-		print("[NodeAdapter] ❌ RemotePlayers not found in World")
-		return
-
-	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
-	if not remote_players:
-		print("[NodeAdapter] ❌ RemotePlayers cast failed")
-		return
-
 	print("[NodeAdapter] 🎭 Spawning ", _pending_members.size(), " pending members...")
+	var player_scene: PackedScene = preload("res://data/scene/character/RigidPlayer.tscn")
+
 	for member_data: Variant in _pending_members:
 		if typeof(member_data) == TYPE_DICTIONARY:
 			var member: Dictionary = member_data as Dictionary
 			var peer_id: int = member.get("peerId", 0) as int
 			var peer_name: String = member.get("name", "Unknown") as String
 
-			# Spawn at random position (will be updated by state sync)
-			remote_players.spawn_remote_player(peer_id, peer_name, Vector3(randf_range(-10, 10), 5, randf_range(-10, 10)))
-			print("[NodeAdapter] ✅ Spawned RemotePlayer for peer ", peer_id, " name=", peer_name)
+			# Check if player already exists (avoid duplicate spawns)
+			if world.has_node(str(peer_id)):
+				print("[NodeAdapter] ⚠️ Player ", peer_id, " already exists, skipping")
+				continue
+
+			# Spawn RigidPlayer for this peer
+			var player: RigidPlayer = player_scene.instantiate()
+			player.name = str(peer_id)
+			player.assigned_player_name = peer_name  # Set remote player's name
+			player.set_multiplayer_authority(peer_id)
+			world.add_child(player, true)
+			print("[NodeAdapter] ✅ Spawned RigidPlayer for peer ", peer_id, " name=", peer_name)
 
 	_pending_members.clear()
 	print("[NodeAdapter] 🎉 All pending members spawned!")
@@ -417,6 +431,10 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	var name: String = data.get("name", "Unknown") as String
 
 	print("[NodeAdapter] 👥 Peer joined: peerId=", peer_id, " name=", name)
+	print("[NodeAdapter] 🔍 Attempting to spawn remote player...")
+
+	# Add to room_members
+	room_members.append({"peerId": peer_id, "name": name})
 
 	# Add to connected peers list if not already there
 	if not _connected_peers.has(peer_id):
@@ -428,30 +446,27 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	peer_joined_with_name.emit(peer_id, name)  # New signal with name for player list
 	print("[NodeAdapter] 📡 Emitted peer_connected signal")
 
-	# Notify World/RemotePlayers to spawn this player
+	# Spawn RigidPlayer for this remote peer
 	var world: Node = Global.get_world()
 	print("[NodeAdapter] 🔍 Looking for World...")
 
 	if not world:
-		print("[NodeAdapter] ❌ World not found")
-		return
-
-	print("[NodeAdapter] ✅ World found")
-
-	if not world.has_node("RemotePlayers"):
-		print("[NodeAdapter] ❌ RemotePlayers not found in World - storing as pending")
-		# Store for later spawning
+		print("[NodeAdapter] ❌ World not found - storing as pending")
 		_pending_members.append({"peerId": peer_id, "name": name})
 		return
 
-	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
-	if not remote_players:
-		print("[NodeAdapter] ❌ RemotePlayers cast failed")
-		return
+	print("[NodeAdapter] ✅ World found, spawning RigidPlayer for peer ", peer_id, " name=", name)
 
-	print("[NodeAdapter] ✅ RemotePlayers manager found, spawning avatar...")
-	remote_players.spawn_remote_player(peer_id, name, Vector3(randf_range(-10, 10), 5, randf_range(-10, 10)))
-	print("[NodeAdapter] ✅ Avatar spawned for peer ", peer_id)
+	# Load player scene and spawn
+	var player_scene: PackedScene = preload("res://data/scene/character/RigidPlayer.tscn")
+	var player: RigidPlayer = player_scene.instantiate()
+	player.name = str(peer_id)
+	player.assigned_player_name = name  # Set the remote player's actual name
+	player.set_multiplayer_authority(peer_id)
+	player.freeze = true  # Ensure remote players are frozen (moved only by network updates)
+	world.add_child(player, true)
+
+	print("[NodeAdapter] ✅ RigidPlayer spawned for peer ", peer_id, " - REMOTE AVATAR NOW VISIBLE")
 
 func _handle_peer_left(data: Dictionary) -> void:
 	"""Handle notification that a peer left the room"""
@@ -459,18 +474,24 @@ func _handle_peer_left(data: Dictionary) -> void:
 
 	print("[NodeAdapter] 👋 Peer left: peerId=", peer_id)
 
+	# Remove from room_members
+	for i in range(room_members.size() - 1, -1, -1):
+		if room_members[i].get("peerId", -1) == peer_id:
+			room_members.remove_at(i)
+			break
+
 	# Remove from connected peers
 	_connected_peers.erase(peer_id)
 
 	# Signal that a peer disconnected
 	peer_disconnected.emit(peer_id)
 
-	# Notify World/RemotePlayers to despawn this player
+	# Despawn RigidPlayer for this peer
 	var world: Node = Global.get_world()
-	if world and world.has_node("RemotePlayers"):
-		var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
-		if remote_players:
-			remote_players.despawn_remote_player(peer_id)
+	if world and world.has_node(str(peer_id)):
+		var player: Node = world.get_node(str(peer_id))
+		print("[NodeAdapter] 🗑️ Despawning player ", peer_id)
+		player.queue_free()
 
 func _handle_player_state(data: Dictionary) -> void:
 	"""Handle incoming player state (position, rotation, velocity)"""
@@ -483,23 +504,32 @@ func _handle_player_state(data: Dictionary) -> void:
 	var rotation: Vector3 = Vector3(rot_data.get("x", 0) as float, rot_data.get("y", 0) as float, rot_data.get("z", 0) as float)
 	var velocity: Vector3 = Vector3(vel_data.get("x", 0) as float, vel_data.get("y", 0) as float, vel_data.get("z", 0) as float)
 
-	# Update RemotePlayer position/rotation
+	# Update RigidPlayer position/rotation directly
 	var world: Node = Global.get_world()
 	if not world:
-		print("[NodeAdapter] ⚠️ player_state received but World not found (peer=", peer_id, ")")
 		return
 
-	if not world.has_node("RemotePlayers"):
-		print("[NodeAdapter] ⚠️ player_state received but RemotePlayers not found (peer=", peer_id, ")")
+	# Find RigidPlayer by peer_id (should be named with peer_id)
+	var player_node: Node = world.get_node_or_null(str(peer_id))
+	if not player_node:
+		print("[NodeAdapter] ⚠️ Player node not found for peer ", peer_id)
 		return
 
-	var remote_players: RemotePlayers = world.get_node("RemotePlayers") as RemotePlayers
-	if not remote_players:
-		print("[NodeAdapter] ⚠️ player_state received but RemotePlayers cast failed (peer=", peer_id, ")")
-		return
-
-	remote_players.update_remote_player_state(peer_id, position, rotation, velocity)
-	#print("[NodeAdapter] 📍 Updated state for peer ", peer_id, ": pos=", position)  # Commented out to reduce spam
+	# RigidPlayer will handle remote state updates via its own sync mechanism
+	# For now, we can directly update transform if it's a remote player
+	if player_node is RigidPlayer:
+		var player: RigidPlayer = player_node as RigidPlayer
+		# Only update if this is not the local player
+		if player.get_multiplayer_authority() != get_unique_peer_id():
+			print("[NodeAdapter] 📍 Syncing peer ", peer_id, " position: ", position)
+			# Ensure remote player physics is frozen
+			player.freeze = true
+			# Update position directly (smoothing addon will handle interpolation)
+			player.global_position = position
+			player.global_rotation = rotation
+			# velocity could be used for prediction but not implemented yet
+		else:
+			print("[NodeAdapter] ⚠️ Ignoring position update for local player ", peer_id)
 
 func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3) -> void:
 	"""Send local player state to server (position, rotation, velocity)"""

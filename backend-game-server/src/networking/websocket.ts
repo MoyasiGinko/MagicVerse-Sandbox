@@ -331,6 +331,7 @@ export function setupWebSocket(server: http.Server) {
             );
             // Player already in room - just send them the room_joined confirmation again
             const members = roomManager.getRoomMembers(roomId);
+            const dbRoom = roomRepo.getRoomById(roomId);
             return send(ws, "room_joined", {
               roomId: roomId,
               peerId,
@@ -339,6 +340,8 @@ export function setupWebSocket(server: http.Server) {
                 name: c.name,
                 isHost: c.isHost,
               })),
+              gamemode: dbRoom?.gamemode || "Deathmatch",
+              mapName: dbRoom?.map_name || "Frozen Field",
               currentTbw: updatedRoom.currentTbw,
             });
           }
@@ -365,6 +368,9 @@ export function setupWebSocket(server: http.Server) {
             members.map((m) => `peer=${m.peerId} name=${m.name}`)
           );
 
+          // Get room info from database to include gamemode and map
+          const dbRoom = roomRepo.getRoomById(roomId);
+
           send(ws, "room_joined", {
             roomId: roomId,
             peerId,
@@ -373,6 +379,8 @@ export function setupWebSocket(server: http.Server) {
               name: c.name,
               isHost: c.isHost,
             })),
+            gamemode: dbRoom?.gamemode || "Deathmatch",
+            mapName: dbRoom?.map_name || "Frozen Field",
             currentTbw: updatedRoom.currentTbw,
           });
 
