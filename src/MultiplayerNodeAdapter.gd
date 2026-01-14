@@ -102,6 +102,11 @@ func _handle_room_created(data: Dictionary) -> void:
 	_room_id = data.get("roomId", "")
 	_peer_id = data.get("peerId", 1)
 	print("[NodeAdapter] ✅ Room created: ", _room_id, " (peer ", _peer_id, ")")
+
+	# For host: also trigger room_joined so player list gets populated
+	_is_server = (_peer_id == 1)
+	room_joined.emit(_peer_id, _room_id)  # Emit room_joined for host too
+
 	room_created.emit(_room_id)
 	UIHandler.show_alert("Room created: " + _room_id, 6, false, UIHandler.alert_colour_player)
 
@@ -186,7 +191,7 @@ func _handle_rpc(data: Dictionary) -> void:
 	var args: Array = data.get("args", [])
 	var from_peer: int = data.get("from", 0)
 
-	# Route to existing Godot RPC methods
+	# Route to existing Godot methods on Main or World
 	var main: Node = get_tree().current_scene
 	if main and main.has_method(method_name):
 		match args.size():
@@ -200,6 +205,12 @@ func _handle_rpc(data: Dictionary) -> void:
 				main.call(method_name, args[0], args[1], args[2])
 			_:
 				main.callv(method_name, args)
+		return
+
+	var world: Node = Global.get_world()
+	if world and world.has_method(method_name):
+		world.callv(method_name, args)
+		return
 
 func _handle_sync(data: Dictionary) -> void:
 	# Handle player state snapshots
@@ -285,6 +296,20 @@ func load_tbw(lines: PackedStringArray) -> void:
 
 func send_player_snapshot(state: Dictionary) -> void:
 	_send_message("player_snapshot", state)
+
+func send_rpc_call(method_name: String, args: Array = [], target_peer: int = 0) -> void:
+	"""Send an RPC-style call to backend to relay to peers.
+
+	- method_name: Name of method to invoke on remote client
+	- args: Positional arguments array
+	- target_peer: 0 to broadcast, or a specific peerId
+	"""
+	var payload: Dictionary = {
+		"method": method_name,
+		"args": args,
+		"targetPeer": target_peer
+	}
+	_send_message("rpc_call", payload)
 
 func kick_peer(peer_id: int) -> void:
 	_send_message("kick_peer", {"peerId": peer_id})
@@ -474,7 +499,7 @@ func _handle_player_state(data: Dictionary) -> void:
 		return
 
 	remote_players.update_remote_player_state(peer_id, position, rotation, velocity)
-	print("[NodeAdapter] 📍 Updated state for peer ", peer_id, ": pos=", position)
+	#print("[NodeAdapter] 📍 Updated state for peer ", peer_id, ": pos=", position)  # Commented out to reduce spam
 
 func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3) -> void:
 	"""Send local player state to server (position, rotation, velocity)"""

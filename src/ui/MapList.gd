@@ -34,11 +34,12 @@ class_name MapList
 var selected_name : String = ""
 var selected_lines : Array = []
 var _map_downloaded : bool = false
+var first_open : bool = true
 
 func add_map(file_name : String, list : Control, can_delete : bool = false, lines : Array = [], id : int = -1) -> void:
 	if lines.is_empty():
 		lines = Global.get_tbw_lines(file_name)
-	
+
 	var image : Variant = Global.get_tbw_image_from_lines(lines)
 	var tex : ImageTexture
 	if image != null && !image.is_empty():
@@ -47,7 +48,7 @@ func add_map(file_name : String, list : Control, can_delete : bool = false, line
 	else:
 		image = load("res://data/textures/tbw_placeholder.jpg")
 		tex = ImageTexture.create_from_image(image as Image)
-	
+
 	var entry_is_featured : bool = false
 	var entry : Control = map_list_entry.instantiate()
 	var entry_map_button : Button = entry.get_node("Map")
@@ -125,38 +126,66 @@ func _ready() -> void:
 	search.connect("text_changed", _on_search)
 	window.connect("tab_changed", _on_tab_changed)
 	refresh()
-	
-	var def_lines := Global.get_tbw_lines("Frozen Field")
+
+	# Try to load the currently active map from Global metadata
+	var map_to_load: String = "Frozen Field"
+	if Global.has_meta("current_room_map"):
+		map_to_load = Global.get_meta("current_room_map")
+		print("[MapList] ✅ Loading active map from Global: ", map_to_load)
+
+	var def_lines := Global.get_tbw_lines(map_to_load)
 	var def_image : Image = Global.get_tbw_image_from_lines(def_lines)
-	_on_map_selected("Frozen Field", def_lines, def_image)
+	_on_map_selected(map_to_load, def_lines, def_image)
+
+	# Wait a frame for entries to be added, then highlight the selected map visually
+	await get_tree().process_frame
+	_highlight_selected_map(map_to_load)
 
 func _on_search(what : String) -> void:
 	if user_uploaded_list == null:
 		return
-	
+
 	if what != "":
 		for c : Control in user_uploaded_list.get_children():
 			c.visible = false
 	else:
 		for c : Control in user_uploaded_list.get_children():
 			c.visible = true
-		return
-	
-	for c : Control in user_uploaded_list.get_children():
-		var name_label : Label = c.get_node_or_null("Map/Split/Labels/Title")
-		var auth_label : Label = c.get_node_or_null("Map/Split/Labels/Author")
-		if name_label != null:
-			if name_label.text.to_lower().contains(what.to_lower()):
-				c.visible = true
-		if auth_label != null:
-			if auth_label.text.to_lower().contains(what.to_lower()):
-				c.visible = true
 
-var first_open : bool = true
+	for c : Control in user_uploaded_list.get_children():
+		if c.has_node("Map/Split/Labels/Title"):
+			var title_label : Label = c.get_node("Map/Split/Labels/Title")
+			if title_label.text.to_lower().contains(what.to_lower()):
+				c.visible = true
+		if c.has_node("Map/Split/Labels/Author"):
+			var auth_label : Label = c.get_node("Map/Split/Labels/Author")
+			if auth_label != null:
+				if auth_label.text.to_lower().contains(what.to_lower()):
+					c.visible = true
+
 func _on_visibility_changed() -> void:
+	if get_tree() == null:
+		return
+
 	if first_open:
 		refresh_user_uploaded()
 		first_open = false
+
+	# When pause menu becomes visible, reload and highlight the active room map
+	if is_visible_in_tree() == true:
+		var map_to_load: String = "Frozen Field"
+		if Global.has_meta("current_room_map"):
+			map_to_load = Global.get_meta("current_room_map")
+			print("[MapList] ✅ Pause menu shown - Loading active map from Global: ", map_to_load)
+
+		var def_lines := Global.get_tbw_lines(map_to_load)
+		var def_image : Image = Global.get_tbw_image_from_lines(def_lines)
+		_on_map_selected(map_to_load, def_lines, def_image)
+
+		# Highlight the selected map after a frame
+		await get_tree().process_frame
+		_highlight_selected_map(map_to_load)
+
 	# hide menu when parent menu is hidden
 	if is_visible_in_tree() == false:
 		search.text = ""
@@ -185,7 +214,7 @@ func _on_map_selected(file_name : String, lines : Array, image : Image, id : int
 		var error := req.request(str(UserPreferences.database_repo, "?id=", id))
 		if error != OK:
 			push_error("An error occurred in the HTTP request.")
-		
+
 		window.visible = false
 		if associated_button != null:
 			associated_button.disabled = true
@@ -193,7 +222,7 @@ func _on_map_selected(file_name : String, lines : Array, image : Image, id : int
 		text = "Downloading..."
 		while(!_map_downloaded):
 			await get_tree().create_timer(0.1).timeout
-		
+
 		# show report button for downloaded maps
 		if report_button != null:
 			if report_button.is_connected("pressed", _on_report_pressed):
@@ -238,13 +267,13 @@ var req_time : int = 0
 func refresh_user_uploaded() -> void:
 	if user_uploaded_list == null:
 		return
-	
+
 	for c : Control in user_uploaded_list.get_children():
 		c.queue_free()
-	
+
 	search.text = ""
 	search.editable = false
-	
+
 	# loading tag
 	var l2 := Label.new()
 	l2.name = "_loading"
@@ -253,7 +282,7 @@ func refresh_user_uploaded() -> void:
 	l2.text = "\n\n\nFetching worlds from online database..."
 	l2.modulate = Color("#b973ff")
 	user_uploaded_list.add_child(l2)
-	
+
 	req_time = Time.get_ticks_msec()
 	var req : HTTPRequest = HTTPRequest.new()
 	add_child(req)
@@ -271,7 +300,7 @@ func _user_maps_request_completed(result : int, response_code : int, headers : P
 	var loading_text : Control = user_uploaded_list.get_node_or_null("_loading")
 	if loading_text != null:
 		loading_text.queue_free()
-	
+
 	if (response_code != 200):
 		var lerr := Label.new()
 		lerr.name = "_error"
@@ -280,9 +309,9 @@ func _user_maps_request_completed(result : int, response_code : int, headers : P
 		lerr.modulate = Color("#d65656")
 		user_uploaded_list.add_child(lerr)
 		return
-	
+
 	search.editable = true
-	
+
 	var json := JSON.new()
 	json.parse(body.get_string_from_utf8())
 	var response : Variant = json.get_data()
@@ -308,7 +337,7 @@ func _user_maps_request_completed(result : int, response_code : int, headers : P
 				if r.has("id"):
 					id = r["id"] as int
 				add_map(str(r["name"]), user_uploaded, false, lines, id)
-	
+
 	# debug fetch time @ bottom
 	var l := Label.new()
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -336,3 +365,26 @@ func refresh() -> void:
 			continue
 		add_map(map.split(".")[0], your_maps, true)
 	# user-uploaded is handled seperately to help with bandwidth
+
+## Helper function to highlight the selected map visually
+func _highlight_selected_map(map_name: String) -> void:
+	"""Find and visually highlight the map entry matching map_name"""
+
+	# Search through all list containers to find the matching map entry
+	for list_container: Control in all_lists:
+		var item_list: Control = list_container.get_node_or_null("ScrollContainer/ItemList")
+		if not item_list:
+			continue
+
+		# Search through all map entry buttons to find matching title
+		for entry: Control in item_list.get_children():
+			if entry.has_node("Map/Split/Labels/Title"):
+				var title_label: Label = entry.get_node("Map/Split/Labels/Title")
+				if title_label.text == map_name:
+					# Found the matching map - click its button to highlight
+					var map_button: Button = entry.get_node("Map")
+					map_button.emit_signal("pressed")
+					print("[MapList] ✅ Visually highlighted map: ", map_name)
+					return
+
+	print("[MapList] ⚠️ Could not find map entry to highlight: ", map_name)

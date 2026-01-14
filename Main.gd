@@ -366,7 +366,6 @@ func _on_global_host_pressed() -> void:
 	if global_host_button:
 		global_host_button.text = "Starting server..."
 		global_host_button.disabled = true
-	# keep classic host button in sync for shared Node flow
 	host_button.text = "Starting server..."
 	host_button.disabled = true
 	if main_menu:
@@ -377,7 +376,7 @@ func _on_global_host_pressed() -> void:
 		mode_selector_panel.visible = false
 	if global_play_menu:
 		global_play_menu.visible = false
-	_setup_node_backend_host()
+	_setup_websocket_host()
 
 func _on_global_join_pressed() -> void:
 	"""Handle Join button click from Global menu"""
@@ -400,7 +399,6 @@ func _on_global_join_pressed() -> void:
 	if global_join_button:
 		global_join_button.text = "Connecting..."
 		global_join_button.disabled = true
-	# keep classic join button in sync for shared Node flow
 	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
 	if main_menu:
 		main_menu.visible = false
@@ -410,7 +408,7 @@ func _on_global_join_pressed() -> void:
 		mode_selector_panel.visible = false
 	if global_play_menu:
 		global_play_menu.visible = false
-	_setup_node_backend_client(room_code)
+	_setup_websocket_client(room_code)
 
 # UPnP setup thread
 func _upnp_setup(server_port : int) -> void:
@@ -472,7 +470,7 @@ func _on_host_pressed() -> void:
 
 	# Global (Node) path
 	if play_mode == "global":
-		_setup_node_backend_host()
+		_setup_websocket_host()
 		return
 	# only port forward public servers
 	if host_public:
@@ -570,7 +568,7 @@ func _on_join_pressed(address : Variant = null, is_from_list := false) -> void:
 		var room_code := str(address)
 		if room_code == "":
 			room_code = join_address.text
-		_setup_node_backend_client(room_code)
+		_setup_websocket_client(room_code)
 		return
 
 	# Create the client.
@@ -770,309 +768,11 @@ func remove_player(peer_id : int) -> void:
 			CommandHandler._send_response("Info", str("Pausing the server because no one is online. It will automatically resume when someone joins."))
 			get_tree().paused = true
 
-# ============ Backend Selection Methods ============
+# ============ WebSocket Multiplayer Setup ============
 
-func _setup_node_backend_host() -> void:
-	print("[Main] === SETTING UP NODE BACKEND AS HOST ===")
-	host_button.text = "Starting server..."
-	host_button.disabled = true
-	if global_host_button:
-		global_host_button.text = "Starting server..."
-		global_host_button.disabled = true
+## Signal handlers for old adapter (deprecated, keeping for reference)
+# These are no longer used with WebSocketMultiplayerPeer
 
-	# Create Node adapter
-	node_peer = MultiplayerNodeAdapter.new()
-	add_child(node_peer)
-
-	# Connect adapter signals
-	node_peer.room_created.connect(_on_room_created)
-	node_peer.connection_failed.connect(_on_connection_failed)
-
-	# Connect to Node backend
-	print("[Main] 🔄 Connecting to Node backend...")
-	if not node_peer.connect_to_server(node_server_url):
-		print("[Main] ❌ Failed to connect to Node backend")
-		host_button.text = "Host server"
-		host_button.disabled = false
-		if global_host_button:
-			global_host_button.text = "Host (Global)"
-			global_host_button.disabled = false
-		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
-		return
-
-	# Wait for WebSocket connection to open
-	await get_tree().create_timer(0.5).timeout
-
-	# Send handshake with authentication
-	print("[Main] 🤝 Sending handshake...")
-	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
-
-	# Wait for handshake to be processed
-	await get_tree().create_timer(0.3).timeout
-
-	# Send create_room
-	print("[Main] 📤 Sending create_room...")
-	node_peer.create_room(str(server_version), Global.display_name)
-
-	# Wait for room creation confirmation
-	print("[Main] ⏳ Waiting for room_created signal...")
-	await node_peer.room_created
-	print("[Main] ✅ Room created successfully!")
-
-	# Load world
-	var world : World = $World
-	world.load_tbw.call_deferred("Frozen Field")
-
-	# add camera
-	var camera_inst : Node3D = CAMERA.instantiate()
-	world.add_child(camera_inst, true)
-
-	await Signal(world, "map_loaded")
-	add_peer(node_peer.get_peer_id())
-
-	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
-	get_tree().current_scene.get_node("GameCanvas").visible = true
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-func _setup_node_backend_client(room_code: String = "", map_name: String = "", gamemode: String = "") -> void:
-	print("[Main] 🔗 Joining room: ", room_code, " on server: ", node_server_url)
-
-	# Check if adapter already exists and clean it up
-	if node_peer != null and is_instance_valid(node_peer):
-		print("[Main] ⚠️  Existing adapter found, cleaning up...")
-		node_peer.close()
-		node_peer.queue_free()
-		node_peer = null
-		print("[Main] ✅ Old adapter cleaned up")
-
-	join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
-	if global_join_button:
-		global_join_button.text = "Connecting..."
-		global_join_button.disabled = true
-
-	# Create Node adapter
-	print("[Main] 🔨 Creating MultiplayerNodeAdapter...")
-	node_peer = MultiplayerNodeAdapter.new()
-	add_child(node_peer)
-	# Store adapter in main scene metadata so players can access it
-	get_tree().root.get_child(0).set_meta("node_adapter", node_peer)
-	print("[Main] ✅ MultiplayerNodeAdapter created and added")
-
-	# Connect adapter signals
-	print("[Main] 🔗 Connecting adapter signals...")
-	node_peer.room_joined.connect(_on_room_joined)
-	node_peer.connection_failed.connect(_on_connection_failed)
-	node_peer.peer_joined_with_name.connect(_on_peer_joined_with_name)
-	print("[Main] ✅ Signals connected")
-
-	# Connect to Node backend
-	print("[Main] 🔄 Connecting to Node backend at ", node_server_url, "...")
-	if not node_peer.connect_to_server(node_server_url):
-		print("[Main] ❌ Failed to connect to Node backend")
-		join_button.text = JsonHandler.find_entry_in_file("ui/join_clicked")
-		if global_join_button:
-			global_join_button.text = "Join (Global)"
-			global_join_button.disabled = false
-		UIHandler.show_alert("Failed to connect to Node backend", 6, false, UIHandler.alert_colour_error)
-		return
-
-	# Wait for WebSocket connection to open
-	print("[Main] ⏳ Waiting 0.5s for WebSocket connection to establish...")
-	await get_tree().create_timer(0.5).timeout
-	print("[Main] ✅ Waited, continuing...")
-
-	# Send handshake with authentication
-	print("[Main] 🤝 Sending handshake with token...")
-	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
-	print("[Main] ✅ Handshake sent")
-
-	# Wait for handshake to be processed
-	print("[Main] ⏳ Waiting 0.3s for handshake processing...")
-	await get_tree().create_timer(0.3).timeout
-	print("[Main] ✅ Waited, continuing...")
-
-	# Send join_room
-	if room_code.is_empty():
-		room_code = join_address.text
-	print("[Main] 📤 SENDING JOIN_ROOM:")
-	print("[Main]   - Room code: ", room_code)
-	print("[Main]   - Version: ", str(server_version))
-	print("[Main]   - Player: ", Global.display_name)
-	node_peer.join_room(room_code, str(server_version), Global.display_name)
-	print("[Main] ✅ join_room message sent")
-
-	# Wait for room_joined signal before loading world
-	print("[Main] ⏳ Waiting for server to confirm room join...")
-	await node_peer.room_joined
-	print("[Main] ✅ Room join confirmed by server!")
-
-	# Note: We don't set multiplayer.multiplayer_peer because MultiplayerPeer is abstract
-	# Instead, we use the node_peer adapter directly for RPC-like calls and peer management
-	print("[Main] 🌐 Adapter ready for multiplayer communication")
-	print("[Main] ✅ Local peer_id=", node_peer.get_unique_peer_id())
-	print("[Main] 🎮 Is host: ", node_peer.is_server())
-
-	# Load world
-	print("[Main] 🌍 Loading world/map...")
-	$World.delete_old_map()
-	print("[Main] ✅ Old map deleted")
-
-	# Load the selected map (or default if not specified)
-	var map_to_load: String = map_name if map_name != "" else "Frozen Field"
-	print("[Main] 🗺️  Loading map: ", map_to_load)
-
-	# For Node backend, load the world directly (not through multiplayer RPC)
-	var lines: Array = Global.get_tbw_lines(map_to_load, false)
-	if lines.size() > 0:
-		print("[Main] 📂 Loaded ", lines.size(), " lines from ", map_to_load, ".tbw")
-		# Call open_tbw directly to parse and load the world
-		# This bypasses the multiplayer RPC system used in ENet
-		$World.open_tbw(lines)
-		print("[Main] ⏳ Waiting for map to fully load...")
-		await Signal($World, "map_loaded")
-		print("[Main] ✅ Map loaded: ", map_to_load)
-	else:
-		print("[Main] ❌ Failed to load map: ", map_to_load, " (file not found)")
-		UIHandler.show_alert("Failed to load map: " + map_to_load, 6, false, UIHandler.alert_colour_error)
-		return
-
-	# add camera
-	print("[Main] 📷 Adding camera...")
-	var camera_inst : Node3D = CAMERA.instantiate()
-	$World.add_child(camera_inst, true)
-	camera_inst.global_position = Vector3(70, 190, 0)
-	print("[Main] ✅ Camera added")
-
-	# Spawn the player character for Node backend
-	print("[Main] 👤 Spawning player character...")
-	var player : RigidPlayer = PLAYER.instantiate()
-	player.name = str(node_peer.get_unique_peer_id())
-	# Set multiplayer authority so the player knows it's theirs
-	player.set_multiplayer_authority(node_peer.get_unique_peer_id())
-	$World.add_child(player, true)
-	Global.connected_to_server = true
-	print("[Main] ✅ Player spawned with peer_id: ", node_peer.get_unique_peer_id())
-
-	# Add RemotePlayers manager for multiplayer avatars
-	print("[Main] 👥 Adding RemotePlayers manager...")
-	var remote_players: RemotePlayers = RemotePlayers.new()
-	remote_players.name = "RemotePlayers"
-	$World.add_child(remote_players as Node)
-	print("[Main] ✅ RemotePlayers manager added")
-
-	# Spawn any existing members that joined before RemotePlayers was ready
-	if node_peer:
-		node_peer.spawn_pending_members()
-
-	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
-	get_tree().current_scene.get_node("GameCanvas").visible = true
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-	Global.get_world().set_loading_canvas_visiblity(false)
-	print("[Main] 🎉 Successfully joined game world!")
-
-	# Wait for the world to fully load and populate gamemodes, then select the gamemode
-	print("[Main] ⏳ Waiting for world to fully load gamemodes...")
-	await $World.tbw_loaded
-	print("[Main] ✅ World fully loaded, gamemodes ready!")
-	_select_stored_gamemode()
-
-	# For Node backend: If we're the host, auto-start the gamemode
-	if node_peer and node_peer.is_server():
-		print("[Main] 🎮 Host detected - auto-starting gamemode...")
-		await get_tree().create_timer(1.0).timeout  # Wait for gamemode selection
-		_start_gamemode_for_node_backend()
-
-func _start_gamemode_for_node_backend() -> void:
-	"""Start the gamemode without RPC (for Node backend hosts)"""
-	if not Global.has_meta("selected_gamemode"):
-		print("[Main] ⚠️ No gamemode to start")
-		return
-
-	var selected_gamemode_name: String = Global.get_meta("selected_gamemode")
-	print("[Main] 🚀 Starting gamemode: ", selected_gamemode_name)
-
-	# Find the gamemode in the world's list
-	for gm: Gamemode in $World.gamemode_list:
-		if gm.gamemode_name == selected_gamemode_name:
-			print("[Main] ✅ Found gamemode, calling run()")
-			gm.run()
-			return
-
-	print("[Main] ❌ Gamemode '", selected_gamemode_name, "' not found in world list")
-
-func _select_stored_gamemode() -> void:
-	"""Select the gamemode that was chosen during room creation"""
-	if not Global.has_meta("selected_gamemode"):
-		print("[Main] ℹ️ No stored gamemode to select")
-		return
-
-	var selected_gamemode_name: String = Global.get_meta("selected_gamemode")
-	print("[Main] 🎮 Attempting to select gamemode: '", selected_gamemode_name, "'")
-
-	# Wait a frame to ensure UI is fully ready
-	await get_tree().process_frame
-
-	# Debug: Print all gamemode names in the list
-	print("[Main] 🔍 Available gamemodes in World.gamemode_list:")
-	for i in range($World.gamemode_list.size()):
-		print("[Main]   [", i, "] '", $World.gamemode_list[i].gamemode_name, "'")
-
-	# Find the gamemode index in the gamemode list
-	var gamemode_idx: int = -1
-	for i in range($World.gamemode_list.size()):
-		if $World.gamemode_list[i].gamemode_name == selected_gamemode_name:
-			gamemode_idx = i
-			print("[Main] 🎯 Match found at index ", i)
-			break
-
-	if gamemode_idx >= 0:
-		print("[Main] ✅ Found gamemode at index ", gamemode_idx, ": ", selected_gamemode_name)
-
-		# Get the gamemode menu
-		var gamemode_menu: Node = get_tree().current_scene.get_node_or_null("GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
-
-		if gamemode_menu:
-			print("[Main] ✅ Found GamemodeMenu node")
-
-			# The GamemodeMenu scene has a PanelContainer root with a VBoxContainer child (also named GamemodeMenu)
-			# The script is on the VBoxContainer, and the selector is its child
-			var inner_menu: Node = gamemode_menu.get_node_or_null("GamemodeMenu")
-			if inner_menu:
-				# Access the selector through the inner menu (which has the script)
-				var selector: Node = inner_menu.get_node_or_null("GamemodeSelector")
-				if selector:
-					print("[Main] ✅ Found selector with ", selector.get_item_count(), " items")
-
-					# Wait until the selector is populated by the _populate_client_gamemode_list RPC
-					var max_attempts: int = 50  # 5 seconds max wait
-					var attempts: int = 0
-					while selector.get_item_count() == 0 and attempts < max_attempts:
-						await get_tree().create_timer(0.1).timeout
-						attempts += 1
-
-					if selector.get_item_count() > 0:
-						print("[Main] ✅ Selector populated, calling select_gamemode(", gamemode_idx, ")")
-						if inner_menu.has_method("select_gamemode"):
-							inner_menu.select_gamemode(gamemode_idx)
-							print("[Main] 🎮 Gamemode selector updated to: ", selected_gamemode_name)
-						else:
-							print("[Main] ⚠️  select_gamemode method not found!")
-					else:
-						print("[Main] ⚠️  Selector never got populated!")
-				else:
-					print("[Main] ⚠️  Could not find GamemodeSelector node!")
-			else:
-				print("[Main] ⚠️  Could not find inner GamemodeMenu VBoxContainer!")
-		else:
-			print("[Main] ⚠️  Could not find GamemodeMenu node at path: GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
-	else:
-		print("[Main] ⚠️  Could not find gamemode: ", selected_gamemode_name)
-
-	# Clear the stored gamemode
-	Global.remove_meta("selected_gamemode")
-
-# Node backend signal handlers
 func _on_room_created(room_id: String) -> void:
 	print("Room created: ", room_id)
 	UIHandler.show_alert("Room created: " + room_id, 6, false, UIHandler.alert_colour_player)
@@ -1120,6 +820,183 @@ func _on_connection_failed(reason: String) -> void:
 	if global_host_button:
 		global_host_button.text = "Host (Global)"
 		global_host_button.disabled = false
+	if global_join_button:
+		global_join_button.text = "Join (Global)"
+		global_join_button.disabled = false
+
+## NEW WEBSOCKET MULTIPLAYER PEER IMPLEMENTATION
+
+func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Field", gamemode: String = "Deathmatch") -> void:
+	"""Setup WebSocket multiplayer as host - uses MultiplayerNodeAdapter"""
+	print("[Main] 🌐 === WEBSOCKET HOST SETUP ===")
+	if room_id != "":
+		print("[Main] 🔑 Room ID (from HTTP API): ", room_id)
+	print("[Main] 🗺️ Map: ", map_name)
+	print("[Main] 🎮 Gamemode: ", gamemode)
+
+	# Store room info for pause menu to read and update
+	Global.set_meta("current_room_id", room_id)
+	Global.set_meta("current_room_map", map_name)
+	Global.set_meta("current_room_gamemode", gamemode)
+	print("[Main] ✅ Room info stored in Global metadata")
+
+	# Create Node adapter (this replaces the old setup we removed)
+	print("[Main] 🔨 Creating MultiplayerNodeAdapter...")
+	node_peer = MultiplayerNodeAdapter.new()
+	add_child(node_peer)
+	set_meta("node_adapter", node_peer)
+	print("[Main] ✅ MultiplayerNodeAdapter created and added")
+
+	# Connect adapter signals
+	print("[Main] 🔗 Connecting adapter signals...")
+	node_peer.connection_failed.connect(_on_connection_failed)
+	print("[Main] ✅ Signals connected")
+
+	# Connect to Node backend
+	print("[Main] 🔄 Connecting to Node backend...")
+	if not node_peer.connect_to_server(node_server_url):
+		push_error("[Main] ❌ Failed to connect")
+		_reset_host_buttons()
+		return
+
+	# Wait for WebSocket connection
+	print("[Main] ⏳ Waiting for connection...")
+	await get_tree().create_timer(0.5).timeout
+
+	# Send handshake
+	print("[Main] 🤝 Sending handshake...")
+	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
+	await get_tree().create_timer(0.3).timeout
+
+# Join or create room
+	if room_id != "":
+		print("[Main] 📥 Joining existing room (created via HTTP API): ", room_id)
+		node_peer.join_room(room_id, str(server_version), Global.display_name)
+		# Wait for backend to confirm room join
+		print("[Main] ⏳ Waiting for room_joined confirmation...")
+		await node_peer.room_joined
+	else:
+		print("[Main] 📤 Creating new room via WebSocket...")
+		node_peer.create_room(str(server_version), Global.display_name)
+		print("[Main] ⏳ Waiting for room_created confirmation...")
+		await node_peer.room_created
+
+	print("[Main] ✅ Room ready, peer_id=", node_peer.get_unique_peer_id())
+
+	print("[Main] ✅ Host setup complete")
+
+	# Store adapter wrapper for RigidPlayer to use for is_server() checks
+	set_meta("adapter_wrapper", AdapterMultiplayerPeer.new(node_peer))
+	print("[Main] ✅ Adapter wrapper stored")
+
+	# Load world and start game with selected map
+	await _load_world_and_start(map_name)
+
+func _setup_websocket_client(room_code: String) -> void:
+	"""Setup WebSocket multiplayer as client - uses MultiplayerNodeAdapter"""
+	print("[Main] 🌐 === WEBSOCKET CLIENT SETUP ===")
+
+	# Create Node adapter
+	print("[Main] 🔨 Creating MultiplayerNodeAdapter...")
+	node_peer = MultiplayerNodeAdapter.new()
+	add_child(node_peer)
+	set_meta("node_adapter", node_peer)
+	print("[Main] ✅ MultiplayerNodeAdapter created and added")
+
+	# Connect adapter signals
+	print("[Main] 🔗 Connecting adapter signals...")
+	node_peer.connection_failed.connect(_on_connection_failed)
+	print("[Main] ✅ Signals connected")
+
+	# Connect to Node backend
+	print("[Main] 🔄 Connecting to Node backend...")
+	if not node_peer.connect_to_server(node_server_url):
+		push_error("[Main] ❌ Failed to connect")
+		_reset_join_buttons()
+		return
+
+	# Wait for WebSocket connection
+	print("[Main] ⏳ Waiting for connection...")
+	await get_tree().create_timer(0.5).timeout
+
+	# Send handshake
+	print("[Main] 🤝 Sending handshake...")
+	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
+	await get_tree().create_timer(0.3).timeout
+
+	# Join room
+	print("[Main] 📤 Joining room: ", room_code)
+	node_peer.join_room(room_code, str(server_version), Global.display_name)
+
+	# Wait for backend to confirm room join (get peer_id and member list)
+	print("[Main] ⏳ Waiting for room_joined confirmation...")
+	await node_peer.room_joined
+	print("[Main] ✅ Room joined, peer_id=", node_peer.get_unique_peer_id())
+
+	print("[Main] ✅ Client setup complete")
+
+	# Store adapter wrapper for RigidPlayer to use for is_server() checks
+	set_meta("adapter_wrapper", AdapterMultiplayerPeer.new(node_peer))
+	print("[Main] ✅ Adapter wrapper stored")
+
+	# Load world and start game
+	await _load_world_and_start("Frozen Field")
+
+func _load_world_and_start(map_name: String) -> void:
+	"""Load world/map for WebSocket multiplayer"""
+	print("[Main] 🌍 Loading world...")
+	$World.delete_old_map()
+
+	var lines: Array = Global.get_tbw_lines(map_name, false)
+	if lines.size() > 0:
+		$World.open_tbw(lines)
+		await Signal($World, "map_loaded")
+		print("[Main] ✅ Map loaded")
+	else:
+		push_error("[Main] ❌ Failed to load map")
+		return
+
+	# Add camera
+	var camera_inst : Node3D = CAMERA.instantiate()
+	$World.add_child(camera_inst, true)
+
+	# Spawn local player character
+	if node_peer:
+		var local_peer_id: int = node_peer.get_unique_peer_id()
+		print("[Main] 👤 Spawning local player (peer_id=", local_peer_id, ")...")
+		var player: RigidPlayer = PLAYER.instantiate()
+		player.name = str(local_peer_id)
+		player.set_multiplayer_authority(local_peer_id)
+		$World.add_child(player, true)
+		print("[Main] ✅ Local player spawned")
+		Global.connected_to_server = true
+
+	# Add RemotePlayers manager for other peers
+	print("[Main] 👥 Adding RemotePlayers manager...")
+	var remote_players: RemotePlayers = RemotePlayers.new()
+	remote_players.name = "RemotePlayers"
+	$World.add_child(remote_players as Node)
+	print("[Main] ✅ RemotePlayers manager added")
+
+	# Spawn any pending members (peers that joined before RemotePlayers was ready)
+	if node_peer:
+		node_peer.spawn_pending_members()
+
+	# Show game UI
+	get_tree().current_scene.get_node("MultiplayerMenu").visible = false
+	get_tree().current_scene.get_node("GameCanvas").visible = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+func _reset_host_buttons() -> void:
+	host_button.text = "Host server"
+	host_button.disabled = false
+	if global_host_button:
+		global_host_button.text = "Host (Global)"
+		global_host_button.disabled = false
+
+func _reset_join_buttons() -> void:
+	join_button.text = JsonHandler.find_entry_in_file("ui/join") if JsonHandler.has_method("find_entry_in_file") else "Join"
+	join_button.disabled = false
 	if global_join_button:
 		global_join_button.text = "Join (Global)"
 		global_join_button.disabled = false

@@ -22,6 +22,17 @@ signal died()
 signal teleported()
 signal kills_increased()
 
+## Helper function to check if this is the server (uses adapter if available)
+func _is_server() -> bool:
+	# First try to get adapter wrapper from Main
+	var main: Main = get_tree().current_scene as Main
+	if main and main.has_meta("adapter_wrapper"):
+		var wrapper: AdapterMultiplayerPeer = main.get_meta("adapter_wrapper") as AdapterMultiplayerPeer
+		if wrapper and wrapper.is_server():
+			return true
+	# Fallback to multiplayer system
+	return multiplayer.is_server()
+
 enum {
 	IDLE,
 	RUN,
@@ -181,7 +192,7 @@ func light_fire(from_who_id : int = -1, initial_damage : int = 1) -> void:
 		on_fire = true
 		# visual fire
 		fire.light()
-		if multiplayer.is_server():
+		if _is_server():
 			# take initial damage
 			reduce_health(initial_damage, CauseOfDeath.FIRE, from_who_id)
 			# 2 damage / s
@@ -852,12 +863,14 @@ func _physics_process(delta : float) -> void:
 	var root: Node = get_tree().root
 	if root.has_meta("node_adapter"):
 		adapter = root.get_meta("node_adapter")
+		print("[RigidPlayer] ✅ Found adapter on root")
 
 	# Method 2: Check all children of root for Main scene with metadata
 	if not adapter:
 		for child in root.get_children():
 			if child.has_meta("node_adapter"):
 				adapter = child.get_meta("node_adapter")
+				print("[RigidPlayer] ✅ Found adapter on child: ", child.name)
 				break
 
 	# Method 3: Try to find Main scene by name
@@ -865,17 +878,22 @@ func _physics_process(delta : float) -> void:
 		var main_scene: Node = root.find_child("Main", true, false)
 		if main_scene and main_scene.has_meta("node_adapter"):
 			adapter = main_scene.get_meta("node_adapter")
+			print("[RigidPlayer] ✅ Found adapter on Main by find_child")
 
 	# Try Node backend if we found adapter
 	if adapter:
-		var my_peer_id: int = int(name)
+		var my_peer_id: int = int(name) if name.is_valid_int() else -1
 		var adapter_peer_id: int = adapter.get_unique_peer_id()
 		is_local_player = my_peer_id == adapter_peer_id
-		print("[RigidPlayer] 🎮 Authority check: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id, " is_local=", is_local_player)
+		if not is_local_player:
+			pass  #print("[RigidPlayer] 🎮 FAILED authority: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id)
 	else:
 		# Fallback to standard multiplayer authority check
 		is_local_player = is_multiplayer_authority()
-		print("[RigidPlayer] 🎮 Using fallback authority: ", is_local_player)
+		if is_local_player:
+			pass  #print("[RigidPlayer] ⚠️ Using fallback authority (no adapter found!): is_local=true")
+		else:
+			pass  #print("[RigidPlayer] ⚠️ Using fallback authority (no adapter found!): is_local=false")
 
 	if not is_local_player:
 		return

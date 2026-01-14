@@ -543,6 +543,8 @@ layout_mode = 2
 layout_mode = 2
 associated_button = NodePath("../ChangeMap")
 report_button = NodePath("../Report")
+json_text = null
+grab_initial_focus = null
 
 [node name="ChangeMap" type="Button" parent="PauseMenu/ScrollContainer/Pause"]
 layout_mode = 2

@@ -71,7 +71,19 @@ func _populate_client_gamemode_list(gamemode_names : Array) -> void:
 	# add new gamemodes
 	for gm : String in gamemode_names:
 		selector.add_item(gm)
-	# load default params
+
+	# Select the currently active gamemode from Global metadata
+	var current_gamemode: String = Global.get_meta("current_room_gamemode") if Global.has_meta("current_room_gamemode") else ""
+	if current_gamemode != "":
+		# Find and select the matching gamemode
+		for i in range(selector.get_item_count()):
+			if selector.get_item_text(i) == current_gamemode:
+				selector.select(i)
+				_on_item_selected(i)
+				print("[GamemodeMenu] ✅ Selected active gamemode: ", current_gamemode)
+				return
+
+	# Fallback: load default params
 	_on_item_selected(0)
 
 func _on_item_selected(index : int) -> void:

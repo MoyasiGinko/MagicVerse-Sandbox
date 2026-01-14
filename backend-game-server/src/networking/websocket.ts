@@ -521,6 +521,39 @@ export function setupWebSocket(server: http.Server) {
           break;
         }
 
+        case "rpc_call": {
+          // Handle RPC calls - relay to target peer(s)
+          if (!session.roomId || session.peerId === null) {
+            return send(ws, "error", { reason: "not_in_room" });
+          }
+          const room = roomManager.getRoom(session.roomId);
+          if (!room) return send(ws, "error", { reason: "room_not_found" });
+
+          const targetPeer = (msg.data as any)?.targetPeer || 0;
+          const method = (msg.data as any)?.method || "";
+          const args = (msg.data as any)?.args || [];
+
+          const rpcData = {
+            fromPeer: session.peerId,
+            method,
+            args,
+          };
+
+          if (targetPeer === 0) {
+            // Broadcast to all peers in room
+            broadcast(room, "rpc_call", rpcData, session.peerId);
+          } else {
+            // Send to specific peer
+            const targetSession = Array.from(clientSessions.values()).find(
+              (s) => s.roomId === room.id && s.peerId === targetPeer
+            );
+            if (targetSession) {
+              send(targetSession.ws, "rpc_call", rpcData);
+            }
+          }
+          break;
+        }
+
         default:
           send(ws, "error", { reason: "unknown_type" });
       }

@@ -199,11 +199,11 @@ func _on_global_host_pressed() -> void:
 		print("[Menu] ❌ Room creation dialog not found!")
 
 func _on_room_created(room_id: String, room_data: Dictionary) -> void:
-	"""Handle new room creation"""
-	print("[Menu] === ROOM CREATED SIGNAL RECEIVED ===")
+	"""Handle new room creation - this is the HOST"""
+	print("[Menu] === ROOM CREATED SIGNAL RECEIVED (HOST) ===")
 	print("[Menu] Room ID: ", room_id)
 	print("[Menu] Room data: ", room_data)
-	print("[Menu] 🔄 Connecting to WebSocket and joining the created room...")
+	print("[Menu] 🔄 Connecting to WebSocket as HOST...")
 
 	# Get Main node
 	var main: Main = get_tree().current_scene as Main
@@ -220,10 +220,9 @@ func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	var gamemode: String = str(room_data.get("gamemode", ""))
 	print("[Menu] 📋 Room settings - Map: ", map_name, " Gamemode: ", gamemode)
 
-	# Connect to Node backend as CLIENT and join the room that was just created
-	# (Room was already created via HTTP, now we need to join it via WebSocket)
-	print("[Menu] ✅ Calling _setup_node_backend_client() to join room: ", room_id)
-	main._setup_node_backend_client(room_id, map_name, gamemode)
+	# Connect to WebSocket as HOST with the room ID, map name, and gamemode
+	print("[Menu] ✅ Calling _setup_websocket_host() with room_id: ", room_id, " map: ", map_name, " gamemode: ", gamemode)
+	main._setup_websocket_host(room_id, map_name, gamemode)
 
 func _on_global_join_pressed() -> void:
 	"""Join a room by address/ID (manual join via text input)"""
@@ -263,9 +262,9 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	var gamemode: String = str(room_data.get("gamemode", ""))
 	print("[Menu] 🗺️  Room settings - Map: ", map_name, " Gamemode: ", gamemode)
 
-	# Connect to Node backend as client and join the room
-	print("[Menu] ✅ Calling _setup_node_backend_client() with room_id: ", room_id)
-	main._setup_node_backend_client(room_id, map_name, gamemode)
+	# Connect to WebSocket and join the room using proper MultiplayerPeerExtension
+	print("[Menu] ✅ Calling _setup_websocket_client() with room_id: ", room_id)
+	main._setup_websocket_client(room_id)
 
 func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""
