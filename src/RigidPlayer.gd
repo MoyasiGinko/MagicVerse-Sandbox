@@ -926,8 +926,9 @@ func _physics_process(delta : float) -> void:
 		set_lifter_particles.rpc(true)
 	elif lifter_particles.emitting:
 		set_lifter_particles.rpc(false)
-	# Set animation blend
-	animator["parameters/BlendRun/blend_amount"] = clamp(linear_velocity.length() / move_speed, 0, 1)
+	# Set animation blend (only for local player - remote players get synced values from network)
+	if is_local_player:
+		animator["parameters/BlendRun/blend_amount"] = clamp(linear_velocity.length() / move_speed, 0, 1)
 	# Set looking direction
 	var hor_linear_velocity := Vector3(linear_velocity.x, 0, linear_velocity.z)
 	if _state != TRIPPED and _state != DEAD and _state != STANDING_UP and _state != ON_LEDGE:
@@ -2109,4 +2110,20 @@ func _send_player_state_to_server() -> void:
 
 	# Send state if we found adapter
 	if adapter and adapter.has_method("send_player_state"):
-		adapter.send_player_state(global_position, global_rotation, linear_velocity)
+		# Collect all animation blend values to sync
+		var anim_data: Dictionary = {}
+		if animator != null:
+			anim_data["blend_run"] = animator.get("parameters/BlendRun/blend_amount")
+			anim_data["blend_jump"] = animator.get("parameters/BlendJump/blend_amount")
+			anim_data["blend_high_jump"] = animator.get("parameters/BlendHighJump/blend_amount")
+			anim_data["blend_dive"] = animator.get("parameters/BlendDive/blend_amount")
+			anim_data["blend_slide"] = animator.get("parameters/BlendSlide/blend_amount")
+			anim_data["blend_slide_back"] = animator.get("parameters/BlendSlideBack/blend_amount")
+			anim_data["blend_roll"] = animator.get("parameters/BlendRoll/blend_amount")
+			anim_data["blend_swim"] = animator.get("parameters/BlendSwim/blend_amount")
+			anim_data["blend_swim_dash"] = animator.get("parameters/BlendSwimDash/blend_amount")
+			anim_data["blend_dead"] = animator.get("parameters/BlendDead/blend_amount")
+			anim_data["blend_on_ledge"] = animator.get("parameters/BlendOnLedge/blend_amount")
+			anim_data["blend_sit"] = animator.get("parameters/BlendSit/blend_amount")
+
+		adapter.send_player_state(global_position, global_rotation, linear_velocity, _state, anim_data)

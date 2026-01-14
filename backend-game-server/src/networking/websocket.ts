@@ -476,6 +476,9 @@ export function setupWebSocket(server: http.Server) {
               position: stateData.position || { x: 0, y: 0, z: 0 },
               rotation: stateData.rotation || { x: 0, y: 0, z: 0 },
               velocity: stateData.velocity || { x: 0, y: 0, z: 0 },
+              // Pass through animation and state so clients can fully sync visuals
+              state: stateData.state ?? 0,
+              anim: stateData.anim || {},
             },
             session.peerId
           );

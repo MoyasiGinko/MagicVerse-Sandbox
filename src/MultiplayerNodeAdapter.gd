@@ -494,11 +494,13 @@ func _handle_peer_left(data: Dictionary) -> void:
 		player.queue_free()
 
 func _handle_player_state(data: Dictionary) -> void:
-	"""Handle incoming player state (position, rotation, velocity)"""
+	"""Handle incoming player state (position, rotation, velocity, animation state, animation blends)"""
 	var peer_id: int = data.get("peerId", 0) as int
 	var pos_data: Dictionary = data.get("position", {"x": 0, "y": 0, "z": 0}) as Dictionary
 	var rot_data: Dictionary = data.get("rotation", {"x": 0, "y": 0, "z": 0}) as Dictionary
 	var vel_data: Dictionary = data.get("velocity", {"x": 0, "y": 0, "z": 0}) as Dictionary
+	var anim_state: int = data.get("state", 0) as int
+	var anim_data: Dictionary = data.get("anim", {}) as Dictionary
 
 	var position: Vector3 = Vector3(pos_data.get("x", 0) as float, pos_data.get("y", 0) as float, pos_data.get("z", 0) as float)
 	var rotation: Vector3 = Vector3(rot_data.get("x", 0) as float, rot_data.get("y", 0) as float, rot_data.get("z", 0) as float)
@@ -535,20 +537,41 @@ func _handle_player_state(data: Dictionary) -> void:
 				player.global_position = current_pos.lerp(position, 0.5)  # 50% lerp for smooth sync
 			player.global_rotation = rotation
 
-			# Sync animations based on received velocity
-			if player.animator != null:
-				# Update animation blend parameter based on velocity (same as local player)
-				var velocity_length: float = velocity.length()
-				if velocity_length > 0.01:
-					player.animator["parameters/BlendRun/blend_amount"] = clamp(velocity_length / player.move_speed, 0, 1)
-				else:
-					player.animator["parameters/BlendRun/blend_amount"] = 0.0
-			# velocity could be used for prediction but not implemented yet
+			# Sync animation state
+			if player._state != anim_state:
+				player._state = anim_state
+
+			# Apply all animation blend values directly from network data
+			if player.animator != null and not anim_data.is_empty():
+				if anim_data.has("blend_run"):
+					player.animator["parameters/BlendRun/blend_amount"] = anim_data.get("blend_run", 0.0)
+				if anim_data.has("blend_jump"):
+					player.animator["parameters/BlendJump/blend_amount"] = anim_data.get("blend_jump", 0.0)
+				if anim_data.has("blend_high_jump"):
+					player.animator["parameters/BlendHighJump/blend_amount"] = anim_data.get("blend_high_jump", 0.0)
+				if anim_data.has("blend_dive"):
+					player.animator["parameters/BlendDive/blend_amount"] = anim_data.get("blend_dive", 0.0)
+				if anim_data.has("blend_slide"):
+					player.animator["parameters/BlendSlide/blend_amount"] = anim_data.get("blend_slide", 0.0)
+				if anim_data.has("blend_slide_back"):
+					player.animator["parameters/BlendSlideBack/blend_amount"] = anim_data.get("blend_slide_back", 0.0)
+				if anim_data.has("blend_roll"):
+					player.animator["parameters/BlendRoll/blend_amount"] = anim_data.get("blend_roll", 0.0)
+				if anim_data.has("blend_swim"):
+					player.animator["parameters/BlendSwim/blend_amount"] = anim_data.get("blend_swim", 0.0)
+				if anim_data.has("blend_swim_dash"):
+					player.animator["parameters/BlendSwimDash/blend_amount"] = anim_data.get("blend_swim_dash", 0.0)
+				if anim_data.has("blend_dead"):
+					player.animator["parameters/BlendDead/blend_amount"] = anim_data.get("blend_dead", 0.0)
+				if anim_data.has("blend_on_ledge"):
+					player.animator["parameters/BlendOnLedge/blend_amount"] = anim_data.get("blend_on_ledge", 0.0)
+				if anim_data.has("blend_sit"):
+					player.animator["parameters/BlendSit/blend_amount"] = anim_data.get("blend_sit", 0.0)
 		else:
 			print("[NodeAdapter] ⚠️ Ignoring position update for local player ", peer_id)
 
-func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3) -> void:
-	"""Send local player state to server (position, rotation, velocity)"""
+func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3, anim_state: int, anim_data: Dictionary) -> void:
+	"""Send local player state to server (position, rotation, velocity, animation state, animation blends)"""
 	if ws == null or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		return
 
@@ -556,6 +579,8 @@ func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3) 
 		"position": {"x": position.x, "y": position.y, "z": position.z},
 		"rotation": {"x": rotation.x, "y": rotation.y, "z": rotation.z},
 		"velocity": {"x": velocity.x, "y": velocity.y, "z": velocity.z},
+		"state": anim_state,
+		"anim": anim_data,
 	})
 
 # Helper method to update server status when we join a room
