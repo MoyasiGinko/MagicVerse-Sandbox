@@ -42,7 +42,7 @@ var is_loading_maps: bool = false
 var backend: GlobalPlayMenuBackend
 
 @onready var gamemode_dropdown: OptionButton = $VBoxContainer/GamemodeContainer/GamemodeDropdown
-@onready var map_dropdown: OptionButton = $VBoxContainer/MapContainer/MapDropdown
+@onready var map_list: MapList = $VBoxContainer/MapList
 @onready var max_players_spin: SpinBox = $VBoxContainer/MaxPlayersContainer/MaxPlayersSpin
 @onready var public_toggle: CheckButton = $VBoxContainer/PublicContainer/PublicToggle
 @onready var create_button: Button = $VBoxContainer/ButtonContainer/CreateButton
@@ -72,10 +72,8 @@ func _ready() -> void:
 	gamemode_dropdown.select(0)
 	print("[RoomCreation] Gamemode dropdown populated with ", GAMEMODES.size(), " options")
 
-	# Map dropdown will be populated when dialog shows
-	map_dropdown.add_item("Loading maps...")
-	map_dropdown.disabled = true
-	print("[RoomCreation] Map dropdown will load from API")
+	# MapList will handle map selection via dedicated UI
+	print("[RoomCreation] MapList initialized for map selection")
 
 	# Setup max players spinner
 	max_players_spin.min_value = 2
@@ -112,7 +110,6 @@ func fetch_available_maps() -> void:
 	var err := _http_worlds.request(url, headers)
 	if err != OK:
 		print("[RoomCreation] ❌ HTTP error:", err)
-		_populate_fallback_maps()
 		is_loading_maps = false
 
 func _on_worlds_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -120,71 +117,24 @@ func _on_worlds_response(result: int, response_code: int, headers: PackedStringA
 	is_loading_maps = false
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
-		print("[RoomCreation] ⚠️ Failed to fetch worlds, using fallback maps")
-		_populate_fallback_maps()
+		print("[RoomCreation] ⚠️ Failed to fetch worlds, MapList will use local maps")
 		return
 
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
 		print("[RoomCreation] ❌ Failed to parse JSON")
-		_populate_fallback_maps()
 		return
 
 	var data := json.data as Dictionary
 	var worlds: Array = data.get("worlds", []) as Array
 
 	if worlds.size() == 0:
-		print("[RoomCreation] ℹ️ No worlds found, using fallback maps")
-		_populate_fallback_maps()
+		print("[RoomCreation] ℹ️ No worlds found, MapList will use fallback maps")
 		return
 
-	# Populate map dropdown with world names
-	available_maps.clear()
-	map_dropdown.clear()
-	map_dropdown.disabled = false
+	print("[RoomCreation] ✅ Loaded worlds from API, MapList will display them")
 
-	for world: Variant in worlds:
-		if typeof(world) == TYPE_DICTIONARY:
-			var world_dict := world as Dictionary
-			var world_name: String = str(world_dict.get("name", "Unknown"))
-			available_maps.append(world_dict)
-			map_dropdown.add_item(world_name)
-
-	map_dropdown.select(0)
-	print("[RoomCreation] ✅ Loaded ", available_maps.size(), " maps from API")
-
-func _populate_fallback_maps() -> void:
-	"""Populate with built-in and user-saved maps"""
-	map_dropdown.clear()
-	map_dropdown.disabled = false
-	available_maps.clear()
-
-	# Get built-in maps from res://data/tbw/
-	var builtin_maps: Array = Global.get_internal_tbw_names()
-	print("[RoomCreation] 📦 Found ", builtin_maps.size(), " built-in maps")
-
-	# Add built-in maps (without .tbw extension)
-	for map_file: String in builtin_maps:
-		if map_file.ends_with(".tbw") and map_file != "editor_default.tbw" and map_file != "tutorial.tbw":
-			var map_name: String = map_file.replace(".tbw", "")
-			map_dropdown.add_item(map_name)
-			available_maps.append({"name": map_name, "type": "builtin"})
-
-	# Get user-saved maps from user://world/
-	var user_maps: Array = Global.get_user_tbw_names()
-	print("[RoomCreation] 💾 Found ", user_maps.size(), " user maps")
-
-	# Add user maps (already without extension from get_user_tbw_names)
-	for map_file: String in user_maps:
-		var map_name: String = map_file.replace(".tbw", "")
-		map_dropdown.add_item(map_name + " (My Maps)")
-		available_maps.append({"name": map_name, "type": "user"})
-
-	if map_dropdown.item_count > 0:
-		map_dropdown.select(0)
-
-	print("[RoomCreation] ✅ Loaded ", available_maps.size(), " total maps")
 func show_dialog() -> void:
 	"""Show the room creation dialog"""
 	print("[RoomCreation] Showing dialog...")
@@ -192,12 +142,7 @@ func show_dialog() -> void:
 	is_creating = false
 	create_button.disabled = false
 	status_label.text = ""
-
-	# Fetch maps when dialog shows
-	if available_maps.size() == 0:
-		fetch_available_maps()
-
-	print("[RoomCreation] Dialog visible: true, ready to create")
+	print("[RoomCreation] Dialog visible: true, MapList will handle map selection")
 
 func hide_dialog() -> void:
 	"""Hide the room creation dialog"""
@@ -218,7 +163,7 @@ func _on_create_pressed() -> void:
 		return
 
 	var gamemode: String = gamemode_dropdown.get_item_text(gamemode_dropdown.get_selected_id())
-	var map_name: String = map_dropdown.get_item_text(map_dropdown.get_selected_id())
+	var map_name: String = map_list.selected_name
 	var max_players: int = int(max_players_spin.value)
 	var is_public: bool = public_toggle.button_pressed
 

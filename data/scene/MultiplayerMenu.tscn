@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3 uid="uid://c5aeyr5rirpm4"]
+[gd_scene load_steps=21 format=3 uid="uid://c5aeyr5rirpm4"]
 
 [ext_resource type="Script" uid="uid://fksufrsb1xj3" path="res://src/MultiplayerMenu.gd" id="1_fgila"]
 [ext_resource type="Texture2D" uid="uid://4biuoel48umc" path="res://title.png" id="2_5iqxy"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" uid="uid://1pilum3034d4" path="res://src/ui/UpdateButton.gd" id="5_awynh"]
 [ext_resource type="Script" uid="uid://byc4v6kv7r8yb" path="res://src/RoomCreationDialog.gd" id="5_room_creation"]
 [ext_resource type="PackedScene" uid="uid://c4pf0l65ojqcw" path="res://data/scene/ui/SettingsMenu.tscn" id="6_j7jhb"]
+[ext_resource type="PackedScene" uid="uid://d4f0w4x3panmu" path="res://data/scene/ui/MapList.tscn" id="14_l2isx"]
 [ext_resource type="Script" uid="uid://dja7u4th8vyb4" path="res://src/GlobalPlayMenuBackend.gd" id="7_gpmb"]
 [ext_resource type="Script" uid="uid://785f2txc3spu" path="res://src/ui/CreditsMenu.gd" id="8_5c1i6"]
 [ext_resource type="Script" uid="uid://ckfgx3scv7ty3" path="res://src/ui/ServerList.gd" id="8_7bulb"]
@@ -989,18 +990,16 @@ vertical_alignment = 1
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="MapContainer" type="HBoxContainer" parent="RoomCreationDialog/VBoxContainer"]
+[node name="MapLabel" type="Label" parent="RoomCreationDialog/VBoxContainer"]
 layout_mode = 2
+text = "Select Map:"
 
-[node name="MapLabel" type="Label" parent="RoomCreationDialog/VBoxContainer/MapContainer"]
+[node name="MapList" parent="RoomCreationDialog/VBoxContainer" node_paths=PackedStringArray("associated_button", "report_button") instance=ExtResource("14_l2isx")]
 layout_mode = 2
-size_flags_horizontal = 3
-text = "Map:"
-vertical_alignment = 1
-
-[node name="MapDropdown" type="OptionButton" parent="RoomCreationDialog/VBoxContainer/MapContainer"]
-layout_mode = 2
-size_flags_horizontal = 3
+associated_button = NodePath("../SelectMapButton")
+report_button = NodePath("../ReportMapButton")
+json_text = null
+grab_initial_focus = null
 
 [node name="MaxPlayersContainer" type="HBoxContainer" parent="RoomCreationDialog/VBoxContainer"]
 layout_mode = 2
@@ -1025,6 +1024,17 @@ vertical_alignment = 1
 
 [node name="PublicToggle" type="CheckButton" parent="RoomCreationDialog/VBoxContainer/PublicContainer"]
 layout_mode = 2
+
+[node name="SelectMapButton" type="Button" parent="RoomCreationDialog/VBoxContainer"]
+visible = false
+layout_mode = 2
+text = "Confirm Map Selection"
+script = ExtResource("2_o48rt")
+
+[node name="ReportMapButton" type="Button" parent="RoomCreationDialog/VBoxContainer"]
+visible = false
+layout_mode = 2
+text = "Report Map"
 
 [node name="StatusLabel" type="Label" parent="RoomCreationDialog/VBoxContainer"]
 modulate = Color(1, 1, 0, 1)
