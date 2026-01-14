@@ -534,6 +534,15 @@ func _handle_player_state(data: Dictionary) -> void:
 				# Small distance = smooth interpolation
 				player.global_position = current_pos.lerp(position, 0.5)  # 50% lerp for smooth sync
 			player.global_rotation = rotation
+
+			# Sync animations based on received velocity
+			if player.animator != null:
+				# Update animation blend parameter based on velocity (same as local player)
+				var velocity_length: float = velocity.length()
+				if velocity_length > 0.01:
+					player.animator["parameters/BlendRun/blend_amount"] = clamp(velocity_length / player.move_speed, 0, 1)
+				else:
+					player.animator["parameters/BlendRun/blend_amount"] = 0.0
 			# velocity could be used for prediction but not implemented yet
 		else:
 			print("[NodeAdapter] ⚠️ Ignoring position update for local player ", peer_id)
