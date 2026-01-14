@@ -524,8 +524,15 @@ func _handle_player_state(data: Dictionary) -> void:
 			print("[NodeAdapter] 📍 Syncing peer ", peer_id, " position: ", position)
 			# Ensure remote player physics is frozen
 			player.freeze = true
-			# Update position directly (smoothing addon will handle interpolation)
-			player.global_position = position
+			# Smoothly interpolate position instead of snapping (reduces jitter from collisions)
+			var current_pos: Vector3 = player.global_position
+			# If distance is very large (teleport), snap; otherwise lerp
+			if current_pos.distance_to(position) > 5.0:
+				# Large distance = teleport (probably respawn or join)
+				player.global_position = position
+			else:
+				# Small distance = smooth interpolation
+				player.global_position = current_pos.lerp(position, 0.5)  # 50% lerp for smooth sync
 			player.global_rotation = rotation
 			# velocity could be used for prediction but not implemented yet
 		else:
