@@ -42,7 +42,11 @@ var visual_mesh_instance : Node3D = null
 # Visual helper overlay for GameCanvas UI
 var tool_overlay : Control = null
 
-# Function for initializing this tool.
+# Helper to check if this tool is owned by local player (for custom backend compatibility)
+func _is_local_authority() -> bool:
+	if tool_player_owner != null:
+		return tool_player_owner.is_local_player
+	return is_multiplayer_authority()
 # Arg 1: The name of this tool.
 # Arg 2: The player who owns this tool. If null, will be considered an editor
 # tool.
@@ -89,7 +93,7 @@ func add_ui_partner() -> void:
 	ui_partner.text = str(ui_tool_name)
 
 func update_tool_number() -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 
 	# first try to load a saved preferred key - saved by tool name
 	var loaded_key_result : Variant = UserPreferences.load_pref(str("keybind_", name), "keybinds")
@@ -131,7 +135,7 @@ func update_tool_number() -> void:
 # Handle the UI and tool selection.
 func _unhandled_input(event : InputEvent) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 
 	if ui_shortcut != null:
 		# only can be used when not disabled
@@ -167,7 +171,7 @@ func get_tool_active() -> bool:
 	return active
 
 func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inactive : bool = true) -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	active = mode
 	if type == ToolType.PLAYER:
 		# Enable/disable tool helper UI.
@@ -211,7 +215,7 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 			ui_partner.button_pressed = false
 
 func set_disabled(new : bool) -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 
 	disabled = new
 	ui_partner.disabled = new
@@ -219,7 +223,7 @@ func set_disabled(new : bool) -> void:
 		set_tool_active(false)
 
 func delete() -> void:
-	if !is_multiplayer_authority() || type == ToolType.EDITOR: return
+	if !_is_local_authority() || type == ToolType.EDITOR: return
 
 	if !deleting:
 		deleting = true

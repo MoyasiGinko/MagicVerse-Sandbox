@@ -60,9 +60,16 @@ var all_tools_paths : Array[String] = ["res://data/scene/tool/BuildTool.tscn",\
 
 var hold_timer := 0
 
+# Helper to check if we are the local player
+func _is_local_authority() -> bool:
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if player_owner != null:
+		return player_owner.is_local_player
+	return get_multiplayer_authority() == multiplayer.get_unique_id()
+
 func _process(delta : float) -> void:
-	# scroll tools when enabled and we are the auth
-	if !disabled && get_multiplayer_authority() == multiplayer.get_unique_id() && Input.mouse_mode == Input.MOUSE_MODE_CAPTURED && get_tools().size() > 0 &&(Input.is_action_just_pressed("switch_tool_right") || Input.is_action_just_pressed("switch_tool_left")):
+	# scroll tools when enabled and we are the local player
+	if !disabled && _is_local_authority() && Input.mouse_mode == Input.MOUSE_MODE_CAPTURED && get_tools().size() > 0 &&(Input.is_action_just_pressed("switch_tool_right") || Input.is_action_just_pressed("switch_tool_left")):
 		var active_tool : Tool = get_active_tool()
 		if active_tool == null:
 			# shift-scroll zooms camera
@@ -141,7 +148,7 @@ func resize_ui() -> void:
 	var tool_list : Control = get_tree().current_scene.get_node("GameCanvas/ToolList")
 	# 220 is size of player list
 	if tool_list.size.x > (get_viewport().get_window().size.x - 240):
-		var nscale := (get_viewport().get_window().size.x - 240) / tool_list.size.x 
+		var nscale := (get_viewport().get_window().size.x - 240) / tool_list.size.x
 		tool_list.scale = Vector2(nscale, nscale)
 	else:
 		tool_list.scale = Vector2(1, 1)
@@ -170,8 +177,10 @@ func has_tool_by_name(name : String) -> Tool:
 # Add a new tool to this tool inventory.
 @rpc("any_peer", "call_local", "reliable")
 func add_tool(tool : ToolIdx, ammo : int = -1, params : Dictionary = {}) -> void:
-	# only run as auth
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != get_multiplayer_authority() && multiplayer.get_remote_sender_id() != 0:
+	# only run if from server (1), local client (0), or the player's authority
+	var sender_id : int = multiplayer.get_remote_sender_id()
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	var ntool : Tool = all_tools[tool].instantiate()
 	if ammo > 0 && (ntool is ShootTool || ntool is PulseCannonTool):
@@ -198,7 +207,9 @@ func get_index_of_tool(tool : Tool) -> int:
 @rpc("any_peer", "call_local", "reliable")
 func delete_all_tools() -> void:
 	# if this change state request is not from the server or the owner client, return
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0 && multiplayer.get_remote_sender_id() != get_multiplayer_authority():
+	var sender_id : int = multiplayer.get_remote_sender_id()
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	for t : Tool in get_tools():
 		t.delete()
@@ -207,7 +218,9 @@ func delete_all_tools() -> void:
 @rpc("any_peer", "call_local", "reliable")
 func give_all_tools() -> void:
 	# if this change state request is not from the server or the owner client, return
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0 && multiplayer.get_remote_sender_id() != get_multiplayer_authority():
+	var sender_id : int = multiplayer.get_remote_sender_id()
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	for at : String in ToolIdx:
 		if at != "PulseCannon":
@@ -219,7 +232,9 @@ func give_all_tools() -> void:
 @rpc("any_peer", "call_local", "reliable")
 func reset() -> void:
 	# if this change state request is not from the server or the owner client, return
-	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0 && multiplayer.get_remote_sender_id() != get_multiplayer_authority():
+	var sender_id : int = multiplayer.get_remote_sender_id()
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	delete_all_tools()
 	give_all_tools()

@@ -68,28 +68,28 @@ func set_shot_cooldown_counter(new : int) -> void:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	super.init(tool_name, get_parent().get_parent() as RigidPlayer)
-	
-	if !is_multiplayer_authority(): return
-	
+
+	if !_is_local_authority(): return
+
 	update_ammo_display()
 	# connect player's body entered & hit by melee tool detection
 	if _shoot_type == ShootType.FIRE:
 		tool_player_owner.connect("body_entered", _on_player_body_entered)
 		tool_player_owner.connect("hit_by_melee", _on_player_body_entered)
-	
+
 	if restore_ammo:
 		restore_timer.one_shot = false
 		restore_timer.wait_time = 0.5
 		restore_timer.connect("timeout", increase_ammo)
 		add_child(restore_timer)
 		restore_timer.start()
-	
+
 	tool_overlay = get_tree().current_scene.get_node_or_null("GameCanvas/ToolOverlay/ChargedTool")
 
 @onready var explosion : PackedScene = SpawnableObjects.explosion
 func _on_player_body_entered(body : Node3D) -> void:
 	# run only as auth
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	# detect if player is hit by these AND tool is currently equipped
 	if get_tool_active() && (body is ClayBall || body is MeleeTool || body is Bomb):
 		explode.rpc(body.get_multiplayer_authority())
@@ -105,7 +105,7 @@ func explode(from_whom_id : int) -> void:
 	explosion_i.play_sound()
 
 func update_ammo_display() -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	# inf ammo
 	if ammo < 1:
 		ui_partner.text = str(ui_tool_name)
@@ -187,7 +187,7 @@ func _set_tool_audio_playing(mode : bool) -> void:
 
 func _physics_process(delta : float) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	var stop_audio := false
 	# if this tool is selected
 	if get_tool_active():
@@ -224,14 +224,14 @@ func _physics_process(delta : float) -> void:
 			elif Input.is_action_just_released("click") && charged_shot && charged_shot_amt > 0 && !tool_player_owner.locked:
 				# Limit the speed at which we can fire.
 				shot_cooldown_counter = shot_cooldown
-				
+
 				if (audio != null && audio_anim != null):
 					if !audio.playing || audio_anim.is_playing():
 						_set_tool_audio_playing.rpc(true)
 				if fire_sound == true && audio != null:
 					audio.pitch_scale = 1 + (0.5 * (charged_shot_amt/charged_shot_amt_max))
 					audio.play()
-				
+
 				if !multiplayer.is_server():
 					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type)
 				else:
@@ -245,7 +245,7 @@ func _physics_process(delta : float) -> void:
 			_end_shot()
 		else:
 			_end_shot()
-	else: 
+	else:
 		stop_audio = true
 		_end_shot()
 		firing = false
@@ -289,4 +289,3 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 			tool_overlay.visible = mode
 			power_meter = tool_overlay.get_node("Power")
 			power_meter_anim = tool_overlay.get_node("Power/AnimationPlayer")
-	

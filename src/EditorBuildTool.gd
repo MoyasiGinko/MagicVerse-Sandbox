@@ -22,6 +22,13 @@ enum States {
 	SELECT
 }
 
+# Local authority helper for editor tool (mirrors base Tool logic)
+func _is_local_authority() -> bool:
+	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	if player_owner != null:
+		return player_owner.is_local_player
+	return is_multiplayer_authority()
+
 @onready var editor : Editor
 @onready var editor_canvas : EditorCanvas = get_tree().current_scene.get_node("EditorCanvas")
 @onready var select_area : Area3D = $SelectArea
@@ -75,7 +82,7 @@ func _ready() -> void:
 # When something is hovered with the selector in the editor.
 func _on_body_selected(body : Node3D) -> void:
 	# if we are not the authority of this object
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	if _state == States.SELECT: return
 
 
@@ -98,7 +105,7 @@ func _on_body_selected(body : Node3D) -> void:
 
 func _on_body_deselected(_body : Node3D) -> void:
 	# if we are not the authority of this object
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	if _state == States.SELECT: return
 
 	var hovering_nothing := true
@@ -386,7 +393,7 @@ func paste_grabbed() -> void:
 		Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, copied_lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
 
 func _physics_process(delta : float) -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 
 	if active:
 		var camera := get_viewport().get_camera_3d()
