@@ -41,7 +41,7 @@ var visual_mesh_instance : Node3D = null
 
 # Visual helper overlay for GameCanvas UI
 var tool_overlay : Control = null
-	
+
 # Function for initializing this tool.
 # Arg 1: The name of this tool.
 # Arg 2: The player who owns this tool. If null, will be considered an editor
@@ -59,8 +59,13 @@ func init(tool_name : String, player_owner : RigidPlayer = null) -> void:
 		tool_inventory = get_parent()
 	# set the name of the tool for the ui
 	ui_tool_name = tool_name
-	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	# only execute on local player (for custom backend, check tool_player_owner.is_local_player)
+	var should_init := false
+	if tool_player_owner != null:
+		should_init = tool_player_owner.is_local_player
+	else:
+		should_init = is_multiplayer_authority()
+	if !should_init: return
 	# Spawn new button for owner of this tool.
 	ui_partner = ui_button.instantiate()
 	# Add tool to UI list.
@@ -85,7 +90,7 @@ func add_ui_partner() -> void:
 
 func update_tool_number() -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	# first try to load a saved preferred key - saved by tool name
 	var loaded_key_result : Variant = UserPreferences.load_pref(str("keybind_", name), "keybinds")
 	if loaded_key_result != null:
@@ -127,7 +132,7 @@ func update_tool_number() -> void:
 func _unhandled_input(event : InputEvent) -> void:
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	if ui_shortcut != null:
 		# only can be used when not disabled
 		if (event is InputEventKey) && !disabled:
@@ -207,7 +212,7 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 
 func set_disabled(new : bool) -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	disabled = new
 	ui_partner.disabled = new
 	if new == true && get_tool_active():
@@ -215,7 +220,7 @@ func set_disabled(new : bool) -> void:
 
 func delete() -> void:
 	if !is_multiplayer_authority() || type == ToolType.EDITOR: return
-	
+
 	if !deleting:
 		deleting = true
 		set_tool_active(false)
