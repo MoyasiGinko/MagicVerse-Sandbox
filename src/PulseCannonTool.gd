@@ -32,11 +32,11 @@ var predelete : bool = false
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	super.init("Pulse Cannon", get_parent().get_parent() as RigidPlayer)
-	if is_multiplayer_authority():
+	if _is_local_authority():
 		update_ammo_display()
 
 func update_ammo_display() -> void:
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	if ui_partner != null:
 		# inf ammo
 		if ammo < 1:
@@ -77,7 +77,7 @@ func _physics_process(delta : float) -> void:
 			beam_active_time += 1
 		else:
 			beam_active_time = 0
-		
+
 		for body in beam_area.get_overlapping_bodies():
 			# make sure we don't damage ourselves
 			if body is RigidPlayer && body.get_multiplayer_authority() != tool_player_owner.get_multiplayer_authority() && damage_cooldown < 1:
@@ -108,7 +108,7 @@ func update_beam(start : Vector3, end : Vector3) -> void:
 	beam_mesh.scale.z = end.distance_to(start)
 	beam_mesh.global_position = end.lerp(start, 0.5)
 	beam_mesh.look_at(end, Vector3(0, 1, 0))
-	
+
 	beam_area_collider.shape.size.z = beam_mesh.scale.z
 	beam_area.global_position = end.lerp(start, 0.5)
 	beam_area.look_at(end, Vector3(0, 1, 0))
@@ -123,7 +123,7 @@ var start : Vector3 = Vector3.ZERO
 var end : Vector3 = Vector3.ZERO
 func _process(delta : float) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	var stop_audio := false
 	# if this tool is selected
 	if get_tool_active():
@@ -169,10 +169,10 @@ func _process(delta : float) -> void:
 
 func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inactive : bool = true) -> void:
 	super(mode, from_click, free_camera_on_inactive)
-	
+
 func delete() -> void:
-	if !is_multiplayer_authority() || type == ToolType.EDITOR: return
-	
+	if !_is_local_authority() || type == ToolType.EDITOR: return
+
 	predelete = true
 	update_beam_active.rpc(false)
 	_force_stop_audio.rpc()

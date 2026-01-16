@@ -84,20 +84,18 @@ func spawn_projectile(auth : int, shot_speed := 30, random_pos := false) -> void
 	set_multiplayer_authority(auth)
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	player_from = world.get_node(str(auth))
-	
-	# Set ball spawn point to player point
-	if player_from != null:
-		global_position = player_from.global_position
-		global_position = player_from.get_node("projectile_spawn_point").global_position
+
+	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
+	# The position was passed via spawn_pos parameter and should be correct
 	if random_pos:
 		global_rotation = player_from.global_rotation
 		translate_object_local(Vector3(randf_range(-0.5, 0.5), randf_range(-0.5, 0.5), 0))
-	
+
 	# Set ball colour to auth's pants colour.
 	set_colour.rpc(Global.pants_colour.to_html(false))
-	
+
 	# Set ball velocity to the position entry of get_mouse_pos_3d dict.
 	var direction := Vector3.ZERO
 	if camera:

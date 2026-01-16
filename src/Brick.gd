@@ -147,12 +147,12 @@ func resize_mesh() -> void:
 				vertex.y += (brick_scale.y - 1) * 0.5
 			if vertex.y < 0:
 				vertex.y -= (brick_scale.y - 1) * 0.5
-			
+
 			if vertex.x > 0:
 				vertex.x += (brick_scale.x - 1) * 0.5
 			if vertex.x < 0:
 				vertex.x -= (brick_scale.x - 1) * 0.5
-			
+
 			if vertex.z > 0:
 				vertex.z += (brick_scale.z - 1) * 0.5
 			if vertex.z < 0:
@@ -230,7 +230,7 @@ func set_property(property : StringName, value : Variant) -> void:
 					joint_collider.shape.radius = (scale_new.y * 0.5) + 0.3
 					cam_collider.shape.height = scale_new.x + 0.4
 					cam_collider.shape.radius = (scale_new.y * 0.5) + 0.2
-					
+
 					var joint_spot_left : Node3D = $JointSpotLeft
 					var joint_spot_right : Node3D = $JointSpotRight
 					var motor_mesh : Node3D = $Smoothing/MotorMesh
@@ -241,7 +241,7 @@ func set_property(property : StringName, value : Variant) -> void:
 	else:
 		set(property, value)
 
-# Set the material of this brick to a different one, 
+# Set the material of this brick to a different one,
 # and update any related properties.
 @rpc("call_local")
 func set_material(new : BrickMaterial) -> void:
@@ -252,10 +252,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, wood_material)
 			mass = 5 * mass_mult
 			unjoin_velocity = 30
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.8, 0)
-			
+
 			flammable = true
 		# Wood Charred
 		1:
@@ -263,10 +263,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, wood_charred_material)
 			mass = 5 * mass_mult
 			unjoin_velocity = 30
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.8, 0)
-			
+
 			flammable = false
 		# Metal
 		2:
@@ -274,10 +274,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, metal_material)
 			mass = 10 * mass_mult
 			unjoin_velocity = 55
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.7, 0)
-			
+
 			flammable = false
 		# Plastic
 		3:
@@ -285,10 +285,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, plastic_material)
 			mass = 3 * mass_mult
 			unjoin_velocity = 15
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.5, 0.1)
-			
+
 			flammable = false
 		# Rubber
 		4:
@@ -296,10 +296,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, rubber_material)
 			mass = 5 * mass_mult
 			unjoin_velocity = 35
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.9, 0.6)
-			
+
 			flammable = false
 		# Grass
 		5:
@@ -307,10 +307,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, grass_material)
 			mass = 3 * mass_mult
 			unjoin_velocity = 15
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.7, 0)
-			
+
 			flammable = false
 		# Ice
 		6:
@@ -318,10 +318,10 @@ func set_material(new : BrickMaterial) -> void:
 			model_mesh.set_surface_override_material(0, ice_material)
 			mass = 3 * mass_mult
 			unjoin_velocity = 15
-			
+
 			# set physics material properties for brick.
 			set_physics_material_properties(0.05, 0)
-			
+
 			flammable = false
 	mesh_material = model_mesh.get_surface_override_material(0)
 
@@ -357,8 +357,8 @@ func set_colour(new : Color) -> void:
 	# Check over the graphics cache to make sure we don't already have the same material created.
 	for cached_material : Material in Global.graphics_cache:
 		# If the material texture and colour matches (that's all that really matters):
-		if (cached_material.albedo_color == new && 
-		cached_material.albedo_texture == new_material.albedo_texture && 
+		if (cached_material.albedo_color == new &&
+		cached_material.albedo_texture == new_material.albedo_texture &&
 		cached_material.normal_texture == new_material.normal_texture):
 			# Instead of using the duplicate material we created, use the cached material.
 			new_material = cached_material
@@ -446,23 +446,23 @@ func unfreeze_entire_group() -> void:
 # Reduce this brick's health by a set amount. Will char wooden bricks if their health falls below 0.
 func reduce_health(amount : int) -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	health -= amount
 	if health <= 0 && flammable:
 		health = 0
 		set_charred(true)
-	
+
 # Sets this brick to a charred state. As of now, only functional on wooden bricks.
 func set_charred(new : bool) -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	if charred != new:
 		charred = new
 		set_glued(false)
 		unjoin()
 		set_material.rpc(BrickMaterial.WOODEN_CHARRED)
 		extinguish_fire.rpc()
-		
+
 # Lights this brick on fire.
 @rpc("any_peer", "call_local")
 func light_fire() -> void:
@@ -505,7 +505,7 @@ func explode(explosion_position : Vector3, from_whom : int = -1, _explosion_forc
 		light_fire.rpc()
 	#0.1s wait to allow for grace period for all affected bricks to unjoin
 	await get_tree().create_timer(0.1).timeout
-	
+
 	var explosion_dir := explosion_position.direction_to(global_position).normalized() * explosion_force
 	apply_impulse(explosion_dir, Vector3(randf_range(0, 0.05), randf_range(0, 0.05), randf_range(0, 0.05)))
 
@@ -518,14 +518,14 @@ func set_non_groupable_for(seconds : float) -> void:
 # Calls on enter scene
 func _ready() -> void:
 	super()
-	
+
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	connect("body_entered", _on_body_entered)
 	connect("sleeping_state_changed", _on_sleeping_state_changed)
 	inactivity_timer.connect("timeout", _inactivity_despawn)
 	# set material to spawn material
 	set_material(_material)
-	
+
 	# Freeze while loading, this is set in peer connected
 	if !multiplayer.is_server():
 		freeze = true
@@ -551,13 +551,11 @@ func spawn_projectile(auth : int, shot_speed : int = 30, material : BrickMateria
 	set_material(material)
 	change_state(States.DUMMY_PROJECTILE)
 	player_from = world.get_node(str(auth))
-	
+
 	if !is_multiplayer_authority(): return
-	# Set projectile spawn point to player point
-	if player_from != null:
-		global_position = player_from.global_position
-		global_position = Vector3(global_position.x, global_position.y + 2.5, global_position.z)
-	
+	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
+	# The position was passed via spawn_pos parameter and should be correct
+
 	# Set velocity to the position entry of the get_mouse_pos_3d dict.
 	var target_pos := Vector3()
 	if camera is Camera:
@@ -567,10 +565,10 @@ func spawn_projectile(auth : int, shot_speed : int = 30, material : BrickMateria
 	var direction := global_position.direction_to(target_pos)
 	linear_velocity = direction * shot_speed
 	angular_velocity = Vector3(1, 1, 1) * (shot_speed * 0.3)
-	
+
 	# make shot bricks on fire
 	light_fire.rpc()
-	
+
 	if is_multiplayer_authority():
 		# notify other clients of this brick's properties
 		sync_properties.rpc(properties_as_dict())
@@ -652,7 +650,7 @@ func check_joints(specific_body : Node3D = null) -> void:
 	if !is_multiplayer_authority(): return
 	# update our child Joint
 	var found_brick := false
-	
+
 	var bodies_to_check : Array[Node3D] = []
 	if specific_body != null:
 		bodies_to_check.append(specific_body)
@@ -660,7 +658,7 @@ func check_joints(specific_body : Node3D = null) -> void:
 	for body in joint_detector.get_overlapping_bodies():
 		if !bodies_to_check.has(body):
 			bodies_to_check.append(body)
-	
+
 	for body in bodies_to_check:
 		# don't join with self
 		if body is Brick && body != self:
@@ -672,7 +670,7 @@ func check_joints(specific_body : Node3D = null) -> void:
 				has_static_neighbour = true
 			found_brick = true
 			if body.joinable && self.joinable:
-				# don't let normal bricks join to motor bricks; 
+				# don't let normal bricks join to motor bricks;
 				if body is MotorBrick && !(self is MotorBrick):
 					# in case motor brick did not check for this brick
 					body.check_joints(self)
@@ -680,7 +678,7 @@ func check_joints(specific_body : Node3D = null) -> void:
 				# Don't let wheels join with seats
 				if (body is MotorBrick && self is MotorSeat) || (body is MotorSeat && self is MotorBrick):
 					continue
-				
+
 				join(body.get_path())
 				# if the motor detector doesn't have the body, it is
 				# joined on the non-motor side, so join the body to
@@ -706,22 +704,22 @@ var joint_path_list : Array[String] = []
 func join(path_to_brick : NodePath, set_group : String = "") -> void:
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	# Do not join to self.
 	if (path_to_brick == self.get_path()):
 		print(str(multiplayer.get_unique_id(), " id:", "[Brick]: Can't join with self"))
 		return
-	
+
 	# Do not join to dummy bricks.
 	var brick_node_state : States = get_node(path_to_brick)._state
 	if (brick_node_state == States.DUMMY_BUILD || brick_node_state == States.DUMMY_PLACED || brick_node_state == States.DUMMY_PROJECTILE):
 		return
-	
+
 	# Do not create duplicate joints.
 	if joint_path_list.has(path_to_brick.get_name(path_to_brick.get_name_count() - 1)):
 		print(str(multiplayer.get_unique_id(), " id:", "[Brick]: Tried duplicate joint"))
 		return
-	
+
 	var joint : Generic6DOFJoint3D = joint_scn.instantiate()
 	add_child(joint, true)
 	if self is MotorBrick:
@@ -750,9 +748,9 @@ func unjoin() -> void:
 	if !is_multiplayer_authority(): return
 	if indestructible:
 		return
-	
+
 	joint_path_list = []
-	
+
 	for j in get_children():
 		if j is Generic6DOFJoint3D:
 			var other_brick : Variant = Global.get_world().get_node_or_null(str(j.node_b))
@@ -781,7 +779,7 @@ func _physics_process(delta : float) -> void:
 	if !is_multiplayer_authority(): return
 	# used by motor seat
 	sync_step += 1
-	
+
 	# handle smoothing, wait a bit to allow smoothing to
 	# move bricks before disabling its process
 	if (freeze && sync_step > 120) && (_state != States.BUILD):
@@ -790,7 +788,7 @@ func _physics_process(delta : float) -> void:
 	else:
 		smoothing.set_physics_process(true)
 		smoothing.set_process(true)
-	
+
 	match _state:
 		_:
 			# despawn brick if it falls out of map
@@ -849,7 +847,7 @@ func enter_state() -> void:
 		States.DUMMY_BUILD:
 			cam_collider.disabled = true
 			collider.disabled = true
-			
+
 			#freeze = true
 		States.DUMMY_PLACED:
 			cam_collider.disabled = false

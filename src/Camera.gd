@@ -101,7 +101,9 @@ func set_target_wait_to_player(target_1 : Node, wait_time := 1) -> void:
 	set_target(target_1)
 	await get_tree().create_timer(wait_time).timeout
 	# update player camera to appropriate mode
-	Global.get_player()._on_camera_mode_changed()
+	var player : RigidPlayer = Global.get_player()
+	if player != null and player.has_method("_on_camera_mode_changed"):
+		player._on_camera_mode_changed()
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:

@@ -43,10 +43,10 @@ func _ready() -> void:
 	if (despawn_time != -1) && despawn_time > 0:
 		despawn_timer = get_tree().create_timer(despawn_time as float)
 		despawn_timer.connect("timeout", _send_explode.bind(1))
-	
+
 	if guided:
 		$MissileBeep.playing = true
-	
+
 	# add a synchronizer if we don't have one
 	if add_synchronizer_on_spawn:
 		add_synchronizer()
@@ -76,15 +76,13 @@ func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 	set_multiplayer_authority(auth)
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	player_from = world.get_node(str(auth))
 	speed = shot_speed
-	
-	# Set ball spawn point to player point
-	if player_from != null:
-		global_position = player_from.global_position
-		global_position = player_from.get_node("projectile_spawn_point").global_position
-	
+
+	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
+	# The position was passed via spawn_pos parameter and should be correct
+
 	# determine rocket direction
 	var direction := Vector3.ZERO
 	if camera:
@@ -96,7 +94,7 @@ func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 		# if player is in seat, add seat velocity
 		if player_from.seat_occupying != null:
 			addl_vel = player_from.seat_occupying.linear_velocity
-	
+
 	if guided:
 		world.connect("map_deleted", connect_explosion)
 		if camera is Camera:
@@ -120,7 +118,7 @@ func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 
 func _physics_process(delta : float) -> void:
 	if !is_multiplayer_authority(): return
-	
+
 	if guided && is_multiplayer_authority():
 		if camera != null:
 			global_rotation.y = lerp_angle(global_rotation.y, camera.global_rotation.y, delta * 1.4)
@@ -131,14 +129,14 @@ func _physics_process(delta : float) -> void:
 		var dir : Vector3 = -global_transform.basis.z
 		dir = dir.normalized()
 		linear_velocity = dir * speed
-		
+
 		# explode on owner's death
 		if player_from._state == RigidPlayer.DEAD:
 			explode.rpc(get_multiplayer_authority())
-		
+
 		if tool_overlay_time != null && despawn_timer != null:
 			tool_overlay_time.value = despawn_timer.time_left
-		
+
 		# show the distance of the nearest player
 		if tool_overlay_dist != null:
 			var min_dist : float = 9999
@@ -153,7 +151,7 @@ func _physics_process(delta : float) -> void:
 func connect_explosion(body : Node3D) -> void:
 	# explode on collision hit. the authority determines if the collision hit
 	# & sends the result to all peers.
-	
+
 	# don't explode when a player hits themselves during the grace period
 	if grace_period && body is RigidPlayer:
 		if body.get_multiplayer_authority() == get_multiplayer_authority():

@@ -49,7 +49,7 @@ func add_visual_mesh_instance() -> void:
 
 func _physics_process(delta : float) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	if !_is_local_authority(): return
 	# if this tool is selected
 	if get_tool_active():
 		if cooldown_counter <= 0:
@@ -112,8 +112,8 @@ func on_hit(body : Node3D) -> void:
 
 func on_large_hit(body : Node3D) -> void:
 	# only run on auth
-	if !is_multiplayer_authority(): return
-	
+	if !_is_local_authority(): return
+
 	# Deflects rockets, bombs, balls, and other players.
 	if (body is Rocket || body is Bomb || body is ClayBall) && deflect_time < 1 && is_hitting:
 		if visual_mesh_instance != null:

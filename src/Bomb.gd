@@ -46,19 +46,17 @@ func spawn_projectile(auth : int, shot_speed : int = 15) -> void:
 	set_multiplayer_authority(auth)
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	player_from = world.get_node(str(auth))
-	
-	# Set ball spawn point to player point
-	if player_from != null:
-		global_position = player_from.global_position
-		global_position = Vector3(global_position.x, global_position.y + 2.5, global_position.z)
-	
+
+	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
+	# The position was passed via spawn_pos parameter and should be correct
+
 	# determine direction from camera
 	var direction : Vector3 = Vector3.ZERO
 	if camera:
 		direction = -camera.global_transform.basis.z
-	
+
 	var player_velocity : Vector3 = player_from.linear_velocity
 	if player_from._state == RigidPlayer.IN_SEAT:
 		player_velocity = player_from.seat_occupying.linear_velocity * 2

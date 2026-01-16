@@ -789,7 +789,12 @@ func _ready() -> void:
 
 		# Try Node backend if we found adapter
 		if adapter:
-			var my_peer_id: int = int(name)
+			# Some scenes name the player with a non-numeric string; fall back to adapter peer id in that case
+			var my_peer_id: int
+			if name.is_valid_int():
+				my_peer_id = int(name)
+			else:
+				my_peer_id = adapter.get_unique_peer_id()
 			var adapter_peer_id: int = adapter.get_unique_peer_id()
 			is_local_player = my_peer_id == adapter_peer_id
 			print("[RigidPlayer] 🎯 _ready() authority check: name='", name, "' my_peer_id=", my_peer_id, " adapter_peer_id=", adapter_peer_id, " is_local=", is_local_player)
@@ -891,7 +896,12 @@ func _physics_process(delta : float) -> void:
 
 	# Try Node backend if we found adapter
 	if adapter:
-		var my_peer_id: int = int(name) if name.is_valid_int() else -1
+		# Fall back to adapter peer id when name is non-numeric
+		var my_peer_id: int
+		if name.is_valid_int():
+			my_peer_id = int(name)
+		else:
+			my_peer_id = adapter.get_unique_peer_id()
 		var adapter_peer_id: int = adapter.get_unique_peer_id()
 		is_local_player = my_peer_id == adapter_peer_id
 		if not is_local_player:
@@ -2027,7 +2037,7 @@ func _receive_server_protect_spawn(time : float = 3.5, overlay := true) -> void:
 			get_tool_inventory().set_disabled(false)
 
 func _on_camera_mode_changed() -> void:
-	if !locked:
+	if !locked && camera != null:
 		if camera.get_camera_mode() == Camera.CameraMode.FREE:
 			camera.set_target(target)
 		elif camera.get_camera_mode() == Camera.CameraMode.AIM:

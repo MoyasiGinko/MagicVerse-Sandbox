@@ -135,8 +135,10 @@ func increase_ammo() -> void:
 # Spawn a projectile. RUN AS SERVER
 # Arg 1: The id to spawn this projectile for.
 # Arg 2: The shot speed of this projectile.
-@rpc("call_local")
-func spawn_projectile(id : int, shot_speed_rpc : float, shoot_type_rpc : ShootType) -> void:
+# Arg 3: The shoot type (brick, rocket, etc)
+# Arg 4: The position to spawn at (from firing player)
+@rpc("any_peer", "call_local", "reliable")
+func spawn_projectile(id : int, shot_speed_rpc : float, shoot_type_rpc : ShootType, spawn_pos : Vector3 = Vector3.ZERO) -> void:
 	# minigame costs
 	var cost : int = 1
 	var can_afford := true
@@ -162,6 +164,9 @@ func spawn_projectile(id : int, shot_speed_rpc : float, shoot_type_rpc : ShootTy
 			_:
 				p = ball.instantiate()
 		if p != null:
+			# Set position from the firing player (passed via RPC)
+			if spawn_pos != Vector3.ZERO:
+				p.global_position = spawn_pos
 			# Spawn projectile for client (this function is run as server).
 			Global.get_world().add_child(p, true)
 			p.spawn_projectile.rpc(id, shot_speed_rpc)
@@ -211,7 +216,9 @@ func _physics_process(delta : float) -> void:
 						audio.play()
 					# if we are NOT the server,
 					# make server spawn ball so it is synced by MultiplayerSpawner
-					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed, _shoot_type)
+					# Calculate spawn position with muzzle offset from player position (not tool position)
+					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
+					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed, _shoot_type, spawn_pos)
 					# Reduce ammo for self (client).
 					reduce_ammo()
 				else:
@@ -233,9 +240,13 @@ func _physics_process(delta : float) -> void:
 					audio.play()
 
 				if !multiplayer.is_server():
-					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type)
+					# Calculate spawn position with muzzle offset from player position (not tool position)
+					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
+					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
 				else:
-					spawn_projectile(multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type)
+					# Calculate spawn position with muzzle offset from player position (not tool position)
+					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
+					spawn_projectile(multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
 				reduce_ammo()
 			else:
 				stop_audio = true

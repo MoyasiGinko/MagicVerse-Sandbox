@@ -523,7 +523,6 @@ func _handle_player_state(data: Dictionary) -> void:
 		var player: RigidPlayer = player_node as RigidPlayer
 		# Only update if this is NOT the local player (use is_local_player flag, not get_multiplayer_authority)
 		if not player.is_local_player:
-			print("[NodeAdapter] 📍 Syncing peer ", peer_id, " position: ", position)
 			# Ensure remote player physics is frozen
 			player.freeze = true
 			# Smoothly interpolate position instead of snapping (reduces jitter from collisions)
@@ -568,7 +567,7 @@ func _handle_player_state(data: Dictionary) -> void:
 				if anim_data.has("blend_sit"):
 					player.animator["parameters/BlendSit/blend_amount"] = anim_data.get("blend_sit", 0.0)
 		else:
-			print("[NodeAdapter] ⚠️ Ignoring position update for local player ", peer_id)
+			pass
 
 func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3, anim_state: int, anim_data: Dictionary) -> void:
 	"""Send local player state to server (position, rotation, velocity, animation state, animation blends)"""

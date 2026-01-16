@@ -17,20 +17,20 @@
 extends Tool
 class_name PaintbrushTool
 
-var colours : Array[Color] = [Color.WHITE, 
-Color.CRIMSON, 
-Color.DARK_RED, 
-Color.CORAL, 
-Color.ORANGE, 
-Color.YELLOW, 
-Color.LIGHT_GREEN, 
-Color.DARK_GREEN, 
-Color.CADET_BLUE, 
-Color.ROYAL_BLUE, 
-Color.MIDNIGHT_BLUE, 
-Color.INDIGO, 
-Color.PURPLE, 
-Color.PINK, 
+var colours : Array[Color] = [Color.WHITE,
+Color.CRIMSON,
+Color.DARK_RED,
+Color.CORAL,
+Color.ORANGE,
+Color.YELLOW,
+Color.LIGHT_GREEN,
+Color.DARK_GREEN,
+Color.CADET_BLUE,
+Color.ROYAL_BLUE,
+Color.MIDNIGHT_BLUE,
+Color.INDIGO,
+Color.PURPLE,
+Color.PINK,
 Color.BLACK]
 
 var _selected_colour_idx : int = 0
@@ -42,8 +42,8 @@ func _ready() -> void:
 
 func _process(delta : float) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
-	
+	if !_is_local_authority(): return
+
 	# If the tool is active (ui partner selected)
 	if get_tool_active():
 		if Input.is_action_just_pressed("paintbrush_next_colour") || Input.is_action_just_pressed("paintbrush_prev_colour"):

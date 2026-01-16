@@ -177,9 +177,12 @@ func has_tool_by_name(name : String) -> Tool:
 # Add a new tool to this tool inventory.
 @rpc("any_peer", "call_local", "reliable")
 func add_tool(tool : ToolIdx, ammo : int = -1, params : Dictionary = {}) -> void:
-	# only run if from server (1), local client (0), or the player's authority
+	# only run if from server (1), local client (0), or if called locally
 	var sender_id : int = multiplayer.get_remote_sender_id()
 	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	# If sender is 0, it's a local call - always allow
+	# If sender is 1, it's from server - always allow
+	# Otherwise check if sender is the player's authority
 	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	var ntool : Tool = all_tools[tool].instantiate()
@@ -206,22 +209,14 @@ func get_index_of_tool(tool : Tool) -> int:
 
 @rpc("any_peer", "call_local", "reliable")
 func delete_all_tools() -> void:
-	# if this change state request is not from the server or the owner client, return
-	var sender_id : int = multiplayer.get_remote_sender_id()
-	var player_owner : RigidPlayer = get_parent() as RigidPlayer
-	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
-		return
+	# Always execute locally; remote peers should only execute on server's authority
 	for t : Tool in get_tools():
 		t.delete()
 	resize_ui()
 
 @rpc("any_peer", "call_local", "reliable")
 func give_all_tools() -> void:
-	# if this change state request is not from the server or the owner client, return
-	var sender_id : int = multiplayer.get_remote_sender_id()
-	var player_owner : RigidPlayer = get_parent() as RigidPlayer
-	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
-		return
+	# Always execute locally
 	for at : String in ToolIdx:
 		if at != "PulseCannon":
 			# index of enum
@@ -231,10 +226,6 @@ func give_all_tools() -> void:
 # resets inventory to default (sandbox) state (all tools in def. states)
 @rpc("any_peer", "call_local", "reliable")
 func reset() -> void:
-	# if this change state request is not from the server or the owner client, return
-	var sender_id : int = multiplayer.get_remote_sender_id()
-	var player_owner : RigidPlayer = get_parent() as RigidPlayer
-	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
-		return
+	# Always execute locally
 	delete_all_tools()
 	give_all_tools()

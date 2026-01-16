@@ -422,7 +422,6 @@ func open_tbw(lines : Array, reset_camera_and_player : bool = true) -> void:
 
 	# reset all player cameras once world is done loading
 	if reset_camera_and_player:
-		print("[World] 🎥 Resetting cameras and positions...")
 		_call_or_rpc("reset_player_cameras", [])
 		_call_or_rpc("reset_player_positions", [])
 	# add basic gamemodes
@@ -606,7 +605,6 @@ func reset_player_positions() -> void:
 	# Find the LOCAL player by checking is_local_player flag
 	for player: RigidPlayer in rigidplayer_list:
 		if player is RigidPlayer and player.is_local_player:
-			print("[World] 📍 Resetting position for LOCAL player: ", player.name)
 			player.change_state(RigidPlayer.IDLE)
 			player.go_to_spawn()
 			break

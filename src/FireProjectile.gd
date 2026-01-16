@@ -31,7 +31,7 @@ func _ready() -> void:
 func _on_body_entered(body : Node3D) -> void:
 	# only run on auth
 	if !is_multiplayer_authority(): return
-	
+
 	if body.has_method("light_fire"):
 		# special "from_who" arg for players
 		if body is RigidPlayer:
@@ -46,14 +46,12 @@ func spawn_projectile(auth : int, shot_speed := 30) -> void:
 	set_multiplayer_authority(auth)
 	# only execute on yourself
 	if !is_multiplayer_authority(): return
-	
+
 	player_from = world.get_node(str(auth))
-	
-	# Set water spawn point to player point
-	if player_from != null:
-		global_position = player_from.global_position
-		global_position = player_from.get_node("projectile_spawn_point").global_position
-	
+
+	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
+	# The position was passed via spawn_pos parameter and should be correct
+
 	# determine direction from camera
 	var direction := Vector3.ZERO
 	if camera:
