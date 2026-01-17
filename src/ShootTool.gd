@@ -216,9 +216,14 @@ func _physics_process(delta : float) -> void:
 						audio.play()
 					# if we are NOT the server,
 					# make server spawn ball so it is synced by MultiplayerSpawner
-					# Calculate spawn position with muzzle offset from player position (not tool position)
+					# Calculate spawn position from the player's projectile_spawn_point if present
 					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
-					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed, _shoot_type, spawn_pos)
+					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
+					if spawn_node != null:
+						spawn_pos = spawn_node.global_position
+					# Pass the tool owner's peer ID (matches player node name in Node backend)
+					var owner_id : int = _get_tool_owner_peer_id()
+					spawn_projectile.rpc_id(1, owner_id, shot_speed, _shoot_type, spawn_pos)
 					# Reduce ammo for self (client).
 					reduce_ammo()
 				else:
@@ -240,13 +245,21 @@ func _physics_process(delta : float) -> void:
 					audio.play()
 
 				if !multiplayer.is_server():
-					# Calculate spawn position with muzzle offset from player position (not tool position)
+					# Calculate spawn position from the player's projectile_spawn_point if present
 					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
-					spawn_projectile.rpc_id(1, multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
+					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
+					if spawn_node != null:
+						spawn_pos = spawn_node.global_position
+					var owner_id : int = _get_tool_owner_peer_id()
+					spawn_projectile.rpc_id(1, owner_id, shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
 				else:
-					# Calculate spawn position with muzzle offset from player position (not tool position)
+					# Calculate spawn position from the player's projectile_spawn_point if present
 					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
-					spawn_projectile(multiplayer.get_unique_id(), shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
+					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
+					if spawn_node != null:
+						spawn_pos = spawn_node.global_position
+					var owner_id : int = _get_tool_owner_peer_id()
+					spawn_projectile(owner_id, shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
 				reduce_ammo()
 			else:
 				stop_audio = true

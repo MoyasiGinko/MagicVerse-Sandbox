@@ -66,13 +66,13 @@ func _process(delta : float) -> void:
 				# if it is hitting something
 				m_pos_3d = m_3d["position"] as Vector3
 			if m_3d:
-				# if we are hovering a brick and we are NOT auth
-				if (m_3d["collider"] is Brick && (m_3d["collider"].get_multiplayer_authority() != get_multiplayer_authority())) || (m_3d["collider"].get_parent() is Brick && (m_3d["collider"].get_parent().get_multiplayer_authority() != get_multiplayer_authority())):
-					var hov_brick : Node3D = m_3d["collider"] as Node3D
-					if m_3d["collider"].get_parent() is Brick:
-						hov_brick = m_3d["collider"].get_parent() as Brick
-					hov_brick.set_colour.rpc(colours[_selected_colour_idx])
-				# if we ARE auth
-				elif m_3d["collider"].owner is Brick && (m_3d["collider"].owner.get_multiplayer_authority() == get_multiplayer_authority()):
-					var brick : Brick = m_3d["collider"].owner
+				# Check if we're hovering a brick
+				var brick : Brick = null
+				if m_3d["collider"] is Brick:
+					brick = m_3d["collider"] as Brick
+				elif m_3d["collider"].get_parent() is Brick:
+					brick = m_3d["collider"].get_parent() as Brick
+
+				if brick != null:
+					# Allow any client to call RPC on a brick (server will sync to others)
 					brick.set_colour.rpc(colours[_selected_colour_idx])

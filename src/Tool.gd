@@ -47,6 +47,34 @@ func _is_local_authority() -> bool:
 	if tool_player_owner != null:
 		return tool_player_owner.is_local_player
 	return is_multiplayer_authority()
+
+# Helper to get tool owner's peer ID (works with both ENet and Node.js backend)
+func _get_tool_owner_peer_id() -> int:
+	if tool_player_owner != null:
+		# For Node.js backend, player is named with peer ID
+		if tool_player_owner.name.is_valid_int():
+			return int(tool_player_owner.name)
+		# Fallback to multiplayer authority
+		return tool_player_owner.get_multiplayer_authority()
+	return get_multiplayer_authority()
+
+# Helper to check if we own another RigidPlayer (works with both ENet and Node.js backend)
+func _do_we_own_player(player: RigidPlayer) -> bool:
+	if player == null:
+		return false
+	# For Node.js backend, check if the player's name matches our peer ID
+	if player.name.is_valid_int():
+		return int(player.name) == _get_tool_owner_peer_id()
+	# Fallback to multiplayer authority check
+	return player.get_multiplayer_authority() == _get_tool_owner_peer_id()
+
+# Helper to check if we own a Brick (works with both ENet and Node.js backend)
+func _do_we_own_brick(brick: Brick) -> bool:
+	if brick == null:
+		return false
+	# For both backends, use multiplayer authority check for bricks
+	# (bricks might not be named with peer IDs)
+	return brick.is_multiplayer_authority()
 # Arg 1: The name of this tool.
 # Arg 2: The player who owns this tool. If null, will be considered an editor
 # tool.

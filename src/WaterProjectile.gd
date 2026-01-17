@@ -35,16 +35,24 @@ func _on_body_entered(body : PhysicsBody3D) -> void:
 @rpc("call_local")
 func spawn_projectile(auth : int, shot_speed := 30) -> void:
 	set_multiplayer_authority(auth)
-	# only execute on yourself
-	if !is_multiplayer_authority(): return
-	
-	player_from = world.get_node(str(auth))
-	
+
+	player_from = world.get_node_or_null(str(auth))
+
+	# For Node.js backend: Check if player_from exists and is local player
+	# For ENet: Check multiplayer authority
+	var should_execute := false
+	if player_from != null and player_from is RigidPlayer:
+		should_execute = player_from.is_local_player
+	else:
+		should_execute = is_multiplayer_authority()
+
+	if !should_execute: return
+
 	# Set water spawn point to player point
 	if player_from != null:
 		global_position = player_from.get_node("projectile_spawn_point").global_position
 		global_position.y -= 0.7
-	
+
 	# determine direction from camera
 	var direction := Vector3.ZERO
 	if camera:

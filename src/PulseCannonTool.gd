@@ -80,17 +80,21 @@ func _physics_process(delta : float) -> void:
 
 		for body in beam_area.get_overlapping_bodies():
 			# make sure we don't damage ourselves
-			if body is RigidPlayer && body.get_multiplayer_authority() != tool_player_owner.get_multiplayer_authority() && damage_cooldown < 1:
-				body.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, get_multiplayer_authority(), true)
-				if beam_active_time > 35:
-					body.light_fire.rpc(tool_player_owner.get_multiplayer_authority(), 0)
-				damage_cooldown = 6
+			if body is RigidPlayer:
+				var body_player : RigidPlayer = body as RigidPlayer
+				# Skip if this is the tool owner
+				if !_do_we_own_player(body_player) && damage_cooldown < 1:
+					var executor_id : int = _get_tool_owner_peer_id()
+					body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
+					if beam_active_time > 35:
+						body_player.light_fire.rpc(executor_id, 0)
+					damage_cooldown = 6
 			elif body is Bomb || body is Rocket:
 				if beam_active_time > 35:
-					body.explode.rpc(tool_player_owner.get_multiplayer_authority())
+					body.explode.rpc(_get_tool_owner_peer_id())
 			elif body is ExplosiveBrick:
 				if beam_active_time > 35:
-					body.explode.rpc(body.global_position, tool_player_owner.get_multiplayer_authority())
+					body.explode.rpc(body.global_position, _get_tool_owner_peer_id())
 		if damage_cooldown > 0:
 			damage_cooldown -= 1
 	if is_multiplayer_authority():

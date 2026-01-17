@@ -76,38 +76,42 @@ func on_hit(body : Node3D) -> void:
 	if !self.is_inside_tree(): return
 	# reduce player health on hit
 	if body is RigidPlayer:
+		var body_player : RigidPlayer = body as RigidPlayer
+		# Don't hit ourselves
+		if _do_we_own_player(body_player):
+			return
+
 		# only take damage if not tripped
-		# don't take damage from our own tool
 		if multiplayer.is_server():
-			if (body._state != RigidPlayer.TRIPPED) && (body.get_multiplayer_authority() != get_multiplayer_authority()):
-				body.reduce_health(damage, RigidPlayer.CauseOfDeath.MELEE, get_multiplayer_authority())
-				body.change_state.rpc_id(body.get_multiplayer_authority(), RigidPlayer.TRIPPED)
+			if body_player._state != RigidPlayer.TRIPPED:
+				var executor_id : int = _get_tool_owner_peer_id()
+				body_player.reduce_health(damage, RigidPlayer.CauseOfDeath.MELEE, executor_id)
+				body_player.change_state.rpc_id(body_player.get_multiplayer_authority(), RigidPlayer.TRIPPED)
 				# running as server
-				body.emit_signal("hit_by_melee", self)
-		# only run this on the authority of who was hit (not necessarily
-		# the authority of the tool)
-		# and don't run on ourselves
-		if (body.get_multiplayer_authority() == multiplayer.get_unique_id()) && (body.get_multiplayer_authority() != get_multiplayer_authority()):
+				body_player.emit_signal("hit_by_melee", self)
+		# only run this on the authority of who was hit (not necessarily the authority of the tool)
+		elif body_player.is_local_player:
 			# running as hit player's authority
-			if !multiplayer.is_server():
-				body.emit_signal("hit_by_melee", self)
+			body_player.emit_signal("hit_by_melee", self)
 			# apply small impulse from bat hit
-			body.apply_impulse(Vector3(randi_range(-2, 2), 5, randi_range(-2, 2)))
+			body_player.apply_impulse(Vector3(randi_range(-2, 2), 5, randi_range(-2, 2)))
 			# apply impulse from knockback (defaults zero, changed with modifiers)
 			if knockback > 0:
-				var knockback_vec : Vector3 = global_position.direction_to(body.global_position).normalized() * knockback
+				var knockback_vec : Vector3 = global_position.direction_to(body_player.global_position).normalized() * knockback
 				knockback_vec.y = knockback * 0.5
-				body.apply_impulse(knockback_vec)
+				body_player.apply_impulse(knockback_vec)
 			# we hit a player, set the player's last hit by ID to this one
-			body.set_last_hit_by_id.rpc(get_multiplayer_authority())
+			var executor_id : int = _get_tool_owner_peer_id()
+			body_player.set_last_hit_by_id.rpc(executor_id)
 	elif body is Character:
 		body.set_health(body.get_health() - damage)
 	# kick players out of seats
 	elif body is MotorSeat:
 		if body.controlling_player != null:
 			# if it's someone else. don't kick ourselves out...
-			if body.controlling_player.get_multiplayer_authority() != get_multiplayer_authority():
-				body.controlling_player.seat_destroyed.rpc_id(body.controlling_player.get_multiplayer_authority(), true)
+			var seat_player : RigidPlayer = body.controlling_player as RigidPlayer
+			if seat_player != null and !_do_we_own_player(seat_player):
+				seat_player.seat_destroyed.rpc_id(seat_player.get_multiplayer_authority(), true)
 				body.set_controlling_player.rpc(-1)
 
 func on_large_hit(body : Node3D) -> void:

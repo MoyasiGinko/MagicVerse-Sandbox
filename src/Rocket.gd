@@ -62,23 +62,39 @@ func explode(from_whom_id : int) -> void:
 	explosion_i.set_explosion_owner(from_whom_id)
 	explosion_i.global_position = global_position
 	explosion_i.play_sound()
-	# wait a bit before resetting camera in guided missiles
-	if guided && is_multiplayer_authority():
-		if camera != null:
-			camera.set_target_wait_to_player(null, 1)
-		player_from.locked = false
-		if tool_overlay != null:
-			tool_overlay.visible = false
+
+	# Reset camera for guided missiles - only if we were controlling it
+	if guided:
+		var local_player : RigidPlayer = Global.get_player()
+		if local_player != null:
+			# Check if the firer matches the local player (ENet: auth, Node.js: name)
+			var is_local_firer : bool = (local_player.get_multiplayer_authority() == from_whom_id) || (local_player.name == str(from_whom_id))
+			if is_local_firer:
+				# Unlock player FIRST to unlock camera, then reset camera target
+				local_player.locked = false
+				if camera != null:
+					camera.locked = false
+					camera.set_target(null, false)
+				if tool_overlay != null:
+					tool_overlay.visible = false
 	queue_free()
 
 @rpc("call_local")
 func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 	set_multiplayer_authority(auth)
-	# only execute on yourself
-	if !is_multiplayer_authority(): return
 
-	player_from = world.get_node(str(auth))
+	player_from = world.get_node_or_null(str(auth))
 	speed = shot_speed
+
+	# For Node.js backend: Check if player_from exists and is local player
+	# For ENet: Check multiplayer authority
+	var should_execute := false
+	if player_from != null and player_from is RigidPlayer:
+		should_execute = player_from.is_local_player
+	else:
+		should_execute = is_multiplayer_authority()
+
+	if !should_execute: return
 
 	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
 	# The position was passed via spawn_pos parameter and should be correct
@@ -100,7 +116,7 @@ func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 		if camera is Camera:
 			camera.set_target($Smoothing/target, false)
 			player_from.locked = true
-			if is_multiplayer_authority():
+			if should_execute:
 				tool_overlay = get_tree().current_scene.get_node_or_null("GameCanvas/ToolOverlay/MissileTool")
 				if tool_overlay != null:
 					tool_overlay.visible = true
@@ -117,22 +133,32 @@ func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 	grace_period = false
 
 func _physics_process(delta : float) -> void:
-	if !is_multiplayer_authority(): return
+	# For Node.js backend: Check if player_from exists and is local player
+	# For ENet: Check multiplayer authority
+	var should_execute := false
+	if player_from != null and player_from is RigidPlayer:
+		should_execute = player_from.is_local_player
+	else:
+		should_execute = is_multiplayer_authority()
 
-	if guided && is_multiplayer_authority():
+	if !should_execute: return
+
+	if guided && should_execute:
 		if camera != null:
 			global_rotation.y = lerp_angle(global_rotation.y, camera.global_rotation.y, delta * 1.4)
 			global_rotation.z = lerp_angle(global_rotation.z, camera.global_rotation.z, delta * 1.4)
 			global_rotation.x = lerp_angle(global_rotation.x, camera.global_rotation.x, delta * 1.4)
 		else:
-			explode.rpc(get_multiplayer_authority())
+			if player_from != null:
+				explode.rpc(int(player_from.name))
 		var dir : Vector3 = -global_transform.basis.z
 		dir = dir.normalized()
 		linear_velocity = dir * speed
 
 		# explode on owner's death
 		if player_from._state == RigidPlayer.DEAD:
-			explode.rpc(get_multiplayer_authority())
+			if player_from != null:
+				explode.rpc(int(player_from.name))
 
 		if tool_overlay_time != null && despawn_timer != null:
 			tool_overlay_time.value = despawn_timer.time_left
@@ -144,7 +170,7 @@ func _physics_process(delta : float) -> void:
 				if p != player_from && p.global_position.distance_to(global_position) < min_dist:
 					min_dist = p.global_position.distance_to(global_position)
 			tool_overlay_dist.value = min_dist
-	elif is_multiplayer_authority():
+	elif should_execute:
 		# not guided
 		linear_velocity = -global_transform.basis.z.normalized() * speed + addl_vel
 
@@ -156,7 +182,10 @@ func connect_explosion(body : Node3D) -> void:
 	if grace_period && body is RigidPlayer:
 		if body.get_multiplayer_authority() == get_multiplayer_authority():
 			return
-	explode.rpc(get_multiplayer_authority())
+	if player_from != null:
+		explode.rpc(int(player_from.name))
+	else:
+		explode.rpc(get_multiplayer_authority())
 
 # water does not affect rocket physics
 func entered_water() -> void:

@@ -550,9 +550,17 @@ func spawn_projectile(auth : int, shot_speed : int = 30, material : BrickMateria
 	# set material to spawn material
 	set_material(material)
 	change_state(States.DUMMY_PROJECTILE)
-	player_from = world.get_node(str(auth))
+	player_from = world.get_node_or_null(str(auth))
 
-	if !is_multiplayer_authority(): return
+	# For Node.js backend: Check if player_from exists and is local player
+	# For ENet: Check multiplayer authority
+	var should_execute := false
+	if player_from != null and player_from is RigidPlayer:
+		should_execute = player_from.is_local_player
+	else:
+		should_execute = is_multiplayer_authority()
+
+	if !should_execute: return
 	# Position is already set by ShootTool.spawn_projectile() - do NOT override it
 	# The position was passed via spawn_pos parameter and should be correct
 
@@ -776,7 +784,15 @@ func _inactivity_despawn() -> void:
 
 func _physics_process(delta : float) -> void:
 	# only execute on yourself
-	if !is_multiplayer_authority(): return
+	# For Node.js backend: Check if player_from exists and is local player
+	# For ENet: Check multiplayer authority
+	var should_execute := false
+	if player_from != null and player_from is RigidPlayer:
+		should_execute = player_from.is_local_player
+	else:
+		should_execute = is_multiplayer_authority()
+
+	if !should_execute: return
 	# used by motor seat
 	sync_step += 1
 
