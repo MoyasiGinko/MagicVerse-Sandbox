@@ -30,6 +30,7 @@ var tool_overlay_time : Control = null
 var tool_overlay_dist : Control = null
 var despawn_timer : SceneTreeTimer = null
 var addl_vel := Vector3.ZERO
+var owner_peer_id : int = 0
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -42,7 +43,7 @@ func _ready() -> void:
 	multiplayer.peer_disconnected.connect(_player_left)
 	if (despawn_time != -1) && despawn_time > 0:
 		despawn_timer = get_tree().create_timer(despawn_time as float)
-		despawn_timer.connect("timeout", _send_explode.bind(1))
+		despawn_timer.connect("timeout", _send_explode)
 
 	if guided:
 		$MissileBeep.playing = true
@@ -51,8 +52,15 @@ func _ready() -> void:
 	if add_synchronizer_on_spawn:
 		add_synchronizer()
 
-func _send_explode(from_whom_id : int) -> void:
-	explode.rpc(from_whom_id)
+func _send_explode(from_whom_id : int = -1) -> void:
+	var owner_id : int = from_whom_id
+	if owner_id <= 0:
+		owner_id = owner_peer_id
+	if owner_id <= 0 && player_from != null:
+		owner_id = int(player_from.name)
+	if owner_id <= 0:
+		owner_id = get_multiplayer_authority()
+	explode.rpc(owner_id)
 
 @rpc("any_peer", "call_local", "reliable")
 func explode(from_whom_id : int) -> void:
@@ -69,12 +77,17 @@ func explode(from_whom_id : int) -> void:
 		if local_player != null:
 			# Check if the firer matches the local player (ENet: auth, Node.js: name)
 			var is_local_firer : bool = (local_player.get_multiplayer_authority() == from_whom_id) || (local_player.name == str(from_whom_id))
-			if is_local_firer:
+			var game_camera : Camera = camera as Camera
+			var camera_target_is_this : bool = false
+			if game_camera != null and game_camera.target != null:
+				camera_target_is_this = is_ancestor_of(game_camera.target)
+			var should_reset : bool = is_local_firer || local_player.locked || camera_target_is_this
+			if should_reset:
 				# Unlock player FIRST to unlock camera, then reset camera target
 				local_player.locked = false
-				if camera != null:
-					camera.locked = false
-					camera.set_target_wait_to_player(local_player.target, 0.1)
+				if game_camera != null:
+					game_camera.locked = false
+					game_camera.set_target_wait_to_player(local_player.target, 0.1)
 				if tool_overlay != null:
 					tool_overlay.visible = false
 	queue_free()
@@ -82,6 +95,7 @@ func explode(from_whom_id : int) -> void:
 @rpc("call_local")
 func spawn_projectile(auth : int, shot_speed : float = 15) -> void:
 	set_multiplayer_authority(auth)
+	owner_peer_id = auth
 
 	player_from = world.get_node_or_null(str(auth))
 	speed = shot_speed

@@ -220,8 +220,22 @@ func get_world() -> World:
 # Returns this authority's Player.
 func get_player() -> RigidPlayer:
 	if connected_to_server:
-		return get_world().get_node_or_null(str(multiplayer.get_unique_id()))
-	else: return null
+		var local_id : int = multiplayer.get_unique_id()
+		# If using Node backend, prefer adapter peer id
+		var root: Node = get_tree().root
+		var adapter: MultiplayerNodeAdapter = null
+		if root.has_meta("node_adapter"):
+			adapter = root.get_meta("node_adapter") as MultiplayerNodeAdapter
+		else:
+			for child: Node in root.get_children():
+				if child.has_meta("node_adapter"):
+					adapter = child.get_meta("node_adapter") as MultiplayerNodeAdapter
+					break
+		if adapter != null:
+			local_id = adapter.get_unique_peer_id()
+		return get_world().get_node_or_null(str(local_id))
+	else:
+		return null
 
 # Returns player by name.
 func get_player_by_name(what : String) -> RigidPlayer:
