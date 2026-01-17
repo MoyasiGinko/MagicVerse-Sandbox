@@ -74,7 +74,7 @@ func explode(from_whom_id : int) -> void:
 				local_player.locked = false
 				if camera != null:
 					camera.locked = false
-					camera.set_target(null, false)
+					camera.set_target_wait_to_player(local_player.target, 0.1)
 				if tool_overlay != null:
 					tool_overlay.visible = false
 	queue_free()
