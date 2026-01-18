@@ -24,6 +24,8 @@ enum States {
 
 # Local authority helper for editor tool (mirrors base Tool logic)
 func _is_local_authority() -> bool:
+	if tool_player_owner != null:
+		return tool_player_owner.is_local_player
 	var player_owner : RigidPlayer = get_parent() as RigidPlayer
 	if player_owner != null:
 		return player_owner.is_local_player

@@ -180,10 +180,11 @@ func add_tool(tool : ToolIdx, ammo : int = -1, params : Dictionary = {}) -> void
 	# only run if from server (1), local client (0), or if called locally
 	var sender_id : int = multiplayer.get_remote_sender_id()
 	var player_owner : RigidPlayer = get_parent() as RigidPlayer
+	var is_local_owner : bool = player_owner != null && player_owner.is_local_player
 	# If sender is 0, it's a local call - always allow
 	# If sender is 1, it's from server - always allow
 	# Otherwise check if sender is the player's authority
-	if sender_id != 1 && sender_id != 0 && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
+	if sender_id != 1 && sender_id != 0 && !is_local_owner && (player_owner == null || sender_id != player_owner.get_multiplayer_authority()):
 		return
 	var ntool : Tool = all_tools[tool].instantiate()
 	if ammo > 0 && (ntool is ShootTool || ntool is PulseCannonTool):
