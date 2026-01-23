@@ -91,6 +91,23 @@ func change_player_team(who : RigidPlayer, what_team : Team) -> void:
 	# update info on player's client side
 	who.update_info.rpc_id(who.get_multiplayer_authority())
 
+# Called from Node backend adapter to sync tool visuals across peers
+func remote_tool_visual(peer_id : int, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player == null:
+		return
+	var inv := player.get_tool_inventory()
+	if inv == null:
+		return
+	var tool: Tool = inv.get_node_or_null(tool_node_name) as Tool
+	if tool == null:
+		for t: Tool in inv.get_tools():
+			if t.ui_tool_name == tool_label:
+				tool = t
+				break
+	if tool != null:
+		tool.show_tool_visual(mode)
+
 func add_player_to_list(player : RigidPlayer) -> void:
 	if !rigidplayer_list.has(player):
 		rigidplayer_list.append(player)

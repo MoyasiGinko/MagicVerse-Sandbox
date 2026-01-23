@@ -808,7 +808,8 @@ func _ready() -> void:
 			print("[RigidPlayer] 🚫 Not local player, skipping initialization")
 			return
 
-		get_tool_inventory().reset()
+		# Ensure tools are created on all peers for this player
+		get_tool_inventory().reset.rpc()
 		var camera_to_set: Camera3D = get_viewport().get_camera_3d()
 		print("[RigidPlayer] 📹 Setting camera for local player ", name, " - camera target will be set to my target node")
 		set_camera(camera_to_set)

@@ -75,6 +75,25 @@ func _do_we_own_brick(brick: Brick) -> bool:
 	# For both backends, use multiplayer authority check for bricks
 	# (bricks might not be named with peer IDs)
 	return brick.is_multiplayer_authority()
+
+# Helper to get Node backend adapter if present
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
+func _broadcast_tool_visual(mode : bool) -> void:
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		var owner_id := _get_tool_owner_peer_id()
+		adapter.send_rpc_call("remote_tool_visual", [owner_id, name, ui_tool_name, mode])
+		show_tool_visual(mode)
+	else:
+		show_tool_visual.rpc(mode)
 # Arg 1: The name of this tool.
 # Arg 2: The player who owns this tool. If null, will be considered an editor
 # tool.
@@ -174,7 +193,7 @@ func _unhandled_input(event : InputEvent) -> void:
 			if event.pressed and event.button_index == ui_shortcut:
 				set_tool_active(!get_tool_active())
 
-@rpc("call_local")
+@rpc("any_peer", "call_local", "reliable")
 func show_tool_visual(mode : bool) -> void:
 	if mode == true:
 		# check if visual mesh is null for rpc recievers
@@ -228,7 +247,7 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 					else:
 						camera.set_mode_locked(false, Camera.CameraMode.FREE)
 			if visual_mesh != null:
-				show_tool_visual.rpc(true)
+				_broadcast_tool_visual(true)
 	else:
 		if type == ToolType.PLAYER:
 			if lock_camera_to_aim && free_camera_on_inactive && camera is Camera:
@@ -238,7 +257,7 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 					camera.set_mode_locked(false, Camera.CameraMode.AIM)
 				else:
 					camera.set_mode_locked(false, Camera.CameraMode.FREE)
-			show_tool_visual.rpc(false)
+			_broadcast_tool_visual(false)
 		if !from_click:
 			ui_partner.button_pressed = false
 
