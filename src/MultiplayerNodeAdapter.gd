@@ -75,7 +75,7 @@ func _on_ws_message() -> void:
 			_handle_handshake_accepted(msg_data)
 		"state":
 			_handle_state(msg_data)
-		"rpc":
+		"rpc", "rpc_call":
 			_handle_rpc(msg_data)
 		"sync":
 			_handle_sync(msg_data)

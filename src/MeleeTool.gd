@@ -56,7 +56,12 @@ func _physics_process(delta : float) -> void:
 			if Input.is_action_pressed("click"):
 				# Limit the speed at which we can hit
 				cooldown_counter = cooldown
-				swing.rpc()
+				var adapter := _get_node_adapter()
+				if adapter != null:
+					adapter.send_rpc_call("remote_melee_swing", [_get_tool_owner_peer_id(), name, ui_tool_name])
+					swing()
+				else:
+					swing.rpc()
 	cooldown_counter -= 1
 	if deflect_time > 0:
 		deflect_time -= 1

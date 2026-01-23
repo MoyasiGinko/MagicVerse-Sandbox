@@ -100,7 +100,11 @@ func _physics_process(delta : float) -> void:
 	if is_multiplayer_authority():
 		if beam_active:
 			# for all others, sync at physics fps
-			update_beam.rpc(start, end)
+			var adapter := _get_node_adapter()
+			if adapter != null:
+				adapter.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
+			else:
+				update_beam.rpc(start, end)
 			if beam_ammo_cooldown < 1:
 				reduce_ammo()
 				beam_ammo_cooldown = 6
@@ -134,7 +138,12 @@ func _process(delta : float) -> void:
 		if ammo > 0 || ammo == -1:
 			if Input.is_action_pressed("click") && !predelete:
 				tool_player_owner.locked = true
-				update_beam_active.rpc(true)
+				var adapter := _get_node_adapter()
+				if adapter != null:
+					adapter.send_rpc_call("remote_pulse_beam_active", [_get_tool_owner_peer_id(), name, ui_tool_name, true])
+					update_beam_active(true)
+				else:
+					update_beam_active.rpc(true)
 				if (audio != null && audio_anim != null):
 					if !audio.playing || audio_anim.is_playing():
 						_set_tool_audio_playing.rpc(true)
@@ -150,21 +159,39 @@ func _process(delta : float) -> void:
 					# showing old position
 					# (other clients only sync beam at physics fps)
 					if Input.is_action_just_pressed("click"):
-						update_beam.rpc(start, end)
+						if adapter != null:
+							adapter.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
+						else:
+							update_beam.rpc(start, end)
 			else:
 				tool_player_owner.locked = false
 				if beam_active:
-					update_beam_active.rpc(false)
+					var adapter2 := _get_node_adapter()
+					if adapter2 != null:
+						adapter2.send_rpc_call("remote_pulse_beam_active", [_get_tool_owner_peer_id(), name, ui_tool_name, false])
+						update_beam_active(false)
+					else:
+						update_beam_active.rpc(false)
 				stop_audio = true
 		elif (ammo < 1 && ammo != -1):
 			tool_player_owner.locked = false
 			if beam_active:
-				update_beam_active.rpc(false)
+				var adapter3 := _get_node_adapter()
+				if adapter3 != null:
+					adapter3.send_rpc_call("remote_pulse_beam_active", [_get_tool_owner_peer_id(), name, ui_tool_name, false])
+					update_beam_active(false)
+				else:
+					update_beam_active.rpc(false)
 			stop_audio = true
 	else:
 		tool_player_owner.locked = false
 		if beam_active:
-			update_beam_active.rpc(false)
+			var adapter4 := _get_node_adapter()
+			if adapter4 != null:
+				adapter4.send_rpc_call("remote_pulse_beam_active", [_get_tool_owner_peer_id(), name, ui_tool_name, false])
+				update_beam_active(false)
+			else:
+				update_beam_active.rpc(false)
 		stop_audio = true
 	if stop_audio && (audio != null && audio_anim != null):
 		# if audio is currently playing, and we are not fading out, fade out

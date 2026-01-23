@@ -108,6 +108,87 @@ func remote_tool_visual(peer_id : int, tool_node_name : String, tool_label : Str
 	if tool != null:
 		tool.show_tool_visual(mode)
 
+func remote_tool_reset(peer_id : int) -> void:
+	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player == null:
+		return
+	var inv := player.get_tool_inventory()
+	if inv == null:
+		return
+	inv.reset()
+
+func _find_tool_for_player(peer_id : int, tool_node_name : String, tool_label : String) -> Tool:
+	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player == null:
+		return null
+	var inv := player.get_tool_inventory()
+	if inv == null:
+		return null
+	var tool: Tool = inv.get_node_or_null(tool_node_name) as Tool
+	if tool == null:
+		for t: Tool in inv.get_tools():
+			if t.ui_tool_name == tool_label:
+				tool = t
+				break
+	return tool
+
+func remote_melee_swing(peer_id : int, tool_node_name : String, tool_label : String) -> void:
+	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+	if tool != null and tool is MeleeTool:
+		tool.swing()
+
+func remote_pulse_beam(peer_id : int, tool_node_name : String, tool_label : String, start : Vector3, end : Vector3) -> void:
+	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+	if tool != null and tool is PulseCannonTool:
+		tool.update_beam(start, end)
+
+func remote_pulse_beam_active(peer_id : int, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+	if tool != null and tool is PulseCannonTool:
+		tool.update_beam_active(mode)
+
+# Called from Node backend adapter to spawn projectiles for other peers
+func remote_spawn_projectile(peer_id : int, shot_speed : float, shoot_type : int, spawn_pos : Vector3, explosion_size : float, direction : Vector3) -> void:
+	var p : Node = null
+	match shoot_type:
+		ShootTool.ShootType.BRICK:
+			p = load("res://data/scene/brick/Brick.tscn").instantiate()
+		ShootTool.ShootType.ROCKET:
+			p = load("res://data/scene/rocket/Rocket.tscn").instantiate()
+			p.explosion_size = explosion_size
+		ShootTool.ShootType.BOMB:
+			p = load("res://data/scene/bomb/Bomb.tscn").instantiate()
+			p.explosion_size = explosion_size
+		ShootTool.ShootType.WATER:
+			p = load("res://data/scene/water/WaterProjectile.tscn").instantiate()
+		ShootTool.ShootType.FIRE:
+			p = load("res://data/scene/fire/FireProjectile.tscn").instantiate()
+		ShootTool.ShootType.MISSILE:
+			p = load("res://data/scene/rocket/Rocket.tscn").instantiate()
+			p.guided = true
+			p.explosion_size = explosion_size
+		_:
+			p = load("res://data/scene/clay_ball/ClayBall.tscn").instantiate()
+	if p == null:
+		return
+	# set spawn position
+	if p is Node3D:
+		p.global_position = spawn_pos
+	add_child(p, true)
+	# ensure projectile has owner context
+	if p.has_method("spawn_projectile"):
+		p.spawn_projectile(peer_id, shot_speed)
+	# apply direction so remote peers see it moving
+	var shoot_dir : Vector3 = direction
+	if shoot_dir == Vector3.ZERO:
+		var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+		if player != null:
+			shoot_dir = -player.global_transform.basis.z
+	if p is RigidBody3D:
+		p.linear_velocity = shoot_dir.normalized() * shot_speed
+		if p is Bomb:
+			p.linear_velocity.y += 6
+
 func add_player_to_list(player : RigidPlayer) -> void:
 	if !rigidplayer_list.has(player):
 		rigidplayer_list.append(player)

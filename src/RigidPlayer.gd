@@ -230,7 +230,7 @@ func _set_can_enter_seat(mode : bool) -> void:
 func change_appearance() -> void:
 	update_appearance.rpc(Global.shirt, Global.shirt_texture, Global.hair, Global.shirt_colour, Global.pants_colour, Global.hair_colour, Global.skin_colour)
 
-@rpc ("call_local")
+@rpc("call_local")
 func update_appearance(shirt : int, shirt_texture_base64 : String, hair : int, shirt_colour : Color, pants_colour : Color, hair_colour : Color, skin_colour : Color) -> void:
 	var armature : Skeleton3D = get_node("Smoothing/character_model/character/Skeleton3D")
 	var hair_material : Material = armature.get_node("hair_short/hair_short").get_surface_override_material(0)
@@ -809,7 +809,11 @@ func _ready() -> void:
 			return
 
 		# Ensure tools are created on all peers for this player
-		get_tool_inventory().reset.rpc()
+		if adapter != null:
+			get_tool_inventory().reset()
+			adapter.send_rpc_call("remote_tool_reset", [int(name)])
+		else:
+			get_tool_inventory().reset.rpc()
 		var camera_to_set: Camera3D = get_viewport().get_camera_3d()
 		print("[RigidPlayer] 📹 Setting camera for local player ", name, " - camera target will be set to my target node")
 		set_camera(camera_to_set)

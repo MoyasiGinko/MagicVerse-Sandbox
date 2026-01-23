@@ -214,8 +214,6 @@ func _physics_process(delta : float) -> void:
 					if fire_sound == true && audio != null:
 						audio.pitch_scale = 1
 						audio.play()
-					# if we are NOT the server,
-					# make server spawn ball so it is synced by MultiplayerSpawner
 					# Calculate spawn position from the player's projectile_spawn_point if present
 					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
 					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
@@ -223,7 +221,19 @@ func _physics_process(delta : float) -> void:
 						spawn_pos = spawn_node.global_position
 					# Pass the tool owner's peer ID (matches player node name in Node backend)
 					var owner_id : int = _get_tool_owner_peer_id()
-					spawn_projectile.rpc_id(1, owner_id, shot_speed, _shoot_type, spawn_pos)
+					# Determine shot direction for Node backend sync
+					var direction : Vector3 = -tool_player_owner.global_transform.basis.z
+					var cam : Camera3D = get_viewport().get_camera_3d()
+					if cam != null:
+						direction = -cam.global_transform.basis.z
+					var adapter := _get_node_adapter()
+					if adapter != null:
+						# Node backend: spawn locally and broadcast to other peers
+						spawn_projectile(owner_id, shot_speed, _shoot_type, spawn_pos)
+						adapter.send_rpc_call("remote_spawn_projectile", [owner_id, shot_speed, _shoot_type, spawn_pos, explosion_size, direction])
+					else:
+						# ENet: ask server to spawn for sync
+						spawn_projectile.rpc_id(1, owner_id, shot_speed, _shoot_type, spawn_pos)
 					# Reduce ammo for self (client).
 					reduce_ammo()
 				else:
@@ -244,22 +254,29 @@ func _physics_process(delta : float) -> void:
 					audio.pitch_scale = 1 + (0.5 * (charged_shot_amt/charged_shot_amt_max))
 					audio.play()
 
-				if !multiplayer.is_server():
-					# Calculate spawn position from the player's projectile_spawn_point if present
-					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
-					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
-					if spawn_node != null:
-						spawn_pos = spawn_node.global_position
-					var owner_id : int = _get_tool_owner_peer_id()
-					spawn_projectile.rpc_id(1, owner_id, shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
+				# Calculate spawn position from the player's projectile_spawn_point if present
+				var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
+				var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
+				if spawn_node != null:
+					spawn_pos = spawn_node.global_position
+				var owner_id : int = _get_tool_owner_peer_id()
+				var charged_speed : float = shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max)))
+				# Determine shot direction for Node backend sync
+				var direction : Vector3 = -tool_player_owner.global_transform.basis.z
+				var cam : Camera3D = get_viewport().get_camera_3d()
+				if cam != null:
+					direction = -cam.global_transform.basis.z
+				var adapter := _get_node_adapter()
+				if adapter != null:
+					# Node backend: spawn locally and broadcast to other peers
+					spawn_projectile(owner_id, charged_speed, _shoot_type, spawn_pos)
+					adapter.send_rpc_call("remote_spawn_projectile", [owner_id, charged_speed, _shoot_type, spawn_pos, explosion_size, direction])
 				else:
-					# Calculate spawn position from the player's projectile_spawn_point if present
-					var spawn_pos : Vector3 = tool_player_owner.global_position + Vector3(0, 2.5, 0)
-					var spawn_node : Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
-					if spawn_node != null:
-						spawn_pos = spawn_node.global_position
-					var owner_id : int = _get_tool_owner_peer_id()
-					spawn_projectile(owner_id, shot_speed * (1 + (1.25 * (charged_shot_amt/charged_shot_amt_max))), _shoot_type, spawn_pos)
+					# ENet: ask server to spawn for sync
+					if !multiplayer.is_server():
+						spawn_projectile.rpc_id(1, owner_id, charged_speed, _shoot_type, spawn_pos)
+					else:
+						spawn_projectile(owner_id, charged_speed, _shoot_type, spawn_pos)
 				reduce_ammo()
 			else:
 				stop_audio = true
