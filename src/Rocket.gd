@@ -32,6 +32,15 @@ var despawn_timer : SceneTreeTimer = null
 var addl_vel := Vector3.ZERO
 var owner_peer_id : int = 0
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	# despawn in 15 seconds in case fired off map
@@ -64,6 +73,9 @@ func _send_explode(from_whom_id : int = -1) -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func explode(from_whom_id : int) -> void:
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		adapter.send_rpc_call("remote_explosion", [global_position, explosion_size, from_whom_id])
 	var explosion_i : Explosion = explosion.instantiate()
 	get_tree().current_scene.add_child(explosion_i)
 	explosion_i.set_explosion_size(explosion_size)

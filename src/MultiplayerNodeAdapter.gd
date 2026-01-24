@@ -202,6 +202,7 @@ func _handle_rpc(data: Dictionary) -> void:
 	var method_name: String = data.get("method", "")
 	var args: Array = data.get("args", [])
 	var from_peer: int = data.get("from", 0)
+	print("[NodeAdapter] 📥 rpc_call method=", method_name, " from=", from_peer, " args=", args)
 
 	# Route to existing Godot methods on Main or World
 	var main: Node = get_tree().current_scene
@@ -321,6 +322,7 @@ func send_rpc_call(method_name: String, args: Array = [], target_peer: int = 0) 
 		"args": args,
 		"targetPeer": target_peer
 	}
+	print("[NodeAdapter] 📤 rpc_call method=", method_name, " target=", target_peer, " args=", args)
 	_send_message("rpc_call", payload)
 
 func kick_peer(peer_id: int) -> void:

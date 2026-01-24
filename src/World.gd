@@ -108,7 +108,26 @@ func remote_tool_visual(peer_id : int, tool_node_name : String, tool_label : Str
 	if tool != null:
 		tool.show_tool_visual(mode)
 
+func remote_explosion(position : Variant, explosion_size : float, from_whom_id : int) -> void:
+	var pos := _parse_vec3(position)
+	print("[World] 💣 remote_explosion from=", from_whom_id, " pos=", pos, " size=", explosion_size)
+	var explosion_scene : PackedScene = SpawnableObjects.explosion
+	var explosion_i : Explosion = explosion_scene.instantiate()
+	get_tree().current_scene.add_child(explosion_i)
+	explosion_i.set_explosion_size(explosion_size)
+	explosion_i.set_explosion_owner(from_whom_id)
+	explosion_i.global_position = pos
+	explosion_i.play_sound()
+
+func remote_light_fire(peer_id : int, from_who_id : int, initial_damage : int) -> void:
+	print("[World] 🔥 remote_light_fire target=", peer_id, " from=", from_who_id, " dmg=", initial_damage)
+	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player == null:
+		return
+	player.light_fire(from_who_id, initial_damage)
+
 func remote_tool_reset(peer_id : int) -> void:
+	print("[World] 🧰 remote_tool_reset peer=", peer_id)
 	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
 	if player == null:
 		return
@@ -133,24 +152,33 @@ func _find_tool_for_player(peer_id : int, tool_node_name : String, tool_label : 
 	return tool
 
 func remote_melee_swing(peer_id : int, tool_node_name : String, tool_label : String) -> void:
+	print("[World] 🥊 remote_melee_swing peer=", peer_id, " tool=", tool_node_name)
 	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
 	if tool != null and tool is MeleeTool:
 		tool.swing()
 
 func remote_pulse_beam(peer_id : int, tool_node_name : String, tool_label : String, start : Vector3, end : Vector3) -> void:
+	print("[World] ⚡ remote_pulse_beam peer=", peer_id, " tool=", tool_node_name)
 	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
 		tool.update_beam(start, end)
 
 func remote_pulse_beam_active(peer_id : int, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	print("[World] ⚡ remote_pulse_beam_active peer=", peer_id, " tool=", tool_node_name, " mode=", mode)
 	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
 		tool.update_beam_active(mode)
 
 # Called from Node backend adapter to spawn projectiles for other peers
-func remote_spawn_projectile(peer_id : int, shot_speed : float, shoot_type : int, spawn_pos : Vector3, explosion_size : float, direction : Vector3) -> void:
+
+func remote_spawn_projectile(peer_id : Variant, shot_speed : float, shoot_type : Variant, spawn_pos : Variant, explosion_size : float, direction : Variant) -> void:
+	var spawn := _parse_vec3(spawn_pos)
+	var dir := _parse_vec3(direction)
+	var peer_id_int := _to_int(peer_id)
+	var shoot_type_int := _to_int(shoot_type)
+	print("[World] 💥 remote_spawn_projectile peer=", peer_id_int, " type=", shoot_type_int, " pos=", spawn)
 	var p : Node = null
-	match shoot_type:
+	match shoot_type_int:
 		ShootTool.ShootType.BRICK:
 			p = load("res://data/scene/brick/Brick.tscn").instantiate()
 		ShootTool.ShootType.ROCKET:
@@ -173,21 +201,52 @@ func remote_spawn_projectile(peer_id : int, shot_speed : float, shoot_type : int
 		return
 	# set spawn position
 	if p is Node3D:
-		p.global_position = spawn_pos
+		p.global_position = spawn
 	add_child(p, true)
 	# ensure projectile has owner context
 	if p.has_method("spawn_projectile"):
-		p.spawn_projectile(peer_id, shot_speed)
+		p.spawn_projectile(peer_id_int, shot_speed)
 	# apply direction so remote peers see it moving
-	var shoot_dir : Vector3 = direction
+	var shoot_dir : Vector3 = dir
 	if shoot_dir == Vector3.ZERO:
-		var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+		var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
 		if player != null:
 			shoot_dir = -player.global_transform.basis.z
 	if p is RigidBody3D:
 		p.linear_velocity = shoot_dir.normalized() * shot_speed
 		if p is Bomb:
 			p.linear_velocity.y += 6
+
+func _parse_vec3(value : Variant) -> Vector3:
+	if value is Vector3:
+		return value
+	if value is String:
+		var s := (value as String).strip_edges()
+		# Expected format: "(x, y, z)"
+		if s.begins_with("(") and s.ends_with(")"):
+			s = s.substr(1, s.length() - 2)
+		var parts := s.split(",")
+		if parts.size() >= 3:
+			return Vector3(float(parts[0]), float(parts[1]), float(parts[2]))
+	return Vector3.ZERO
+
+func _to_int(value : Variant) -> int:
+	match typeof(value):
+		TYPE_INT:
+			return value as int
+		TYPE_FLOAT:
+			return int(value as float)
+		TYPE_BOOL:
+			return int(value as bool)
+		TYPE_STRING:
+			var s := (value as String).strip_edges()
+			if s.is_valid_int():
+				return int(s)
+			if s.is_valid_float():
+				return int(float(s))
+			return 0
+		_:
+			return 0
 
 func add_player_to_list(player : RigidPlayer) -> void:
 	if !rigidplayer_list.has(player):

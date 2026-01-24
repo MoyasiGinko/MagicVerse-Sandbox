@@ -22,6 +22,15 @@ class_name FireProjectile
 @onready var camera : Camera3D = get_viewport().get_camera_3d()
 @onready var world : World = Global.get_world()
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	$Area3D.connect("body_entered", _on_body_entered)
@@ -35,7 +44,11 @@ func _on_body_entered(body : Node3D) -> void:
 	if body.has_method("light_fire"):
 		# special "from_who" arg for players
 		if body is RigidPlayer:
-			body.light_fire.rpc(get_multiplayer_authority(), 8)
+			var from_id := get_multiplayer_authority()
+			var adapter := _get_node_adapter()
+			if adapter != null:
+				adapter.send_rpc_call("remote_light_fire", [int(body.name), from_id, 8])
+			body.light_fire(from_id, 8)
 		# lower chance of lighting fire for anything that's not a player
 		else:
 			if (randi() % 10 > 8):
