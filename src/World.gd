@@ -171,9 +171,10 @@ func remote_pulse_beam_active(peer_id : int, tool_node_name : String, tool_label
 
 # Called from Node backend adapter to spawn projectiles for other peers
 
-func remote_spawn_projectile(peer_id : Variant, shot_speed : float, shoot_type : Variant, spawn_pos : Variant, explosion_size : float, direction : Variant) -> void:
+func remote_spawn_projectile(peer_id : Variant, shot_speed : float, shoot_type : Variant, spawn_pos : Variant, explosion_size : float, direction : Variant, player_velocity : Variant = Vector3.ZERO) -> void:
 	var spawn := _parse_vec3(spawn_pos)
 	var dir := _parse_vec3(direction)
+	var vel := _parse_vec3(player_velocity)
 	var peer_id_int := _to_int(peer_id)
 	var shoot_type_int := _to_int(shoot_type)
 	print("[World] 💥 remote_spawn_projectile peer=", peer_id_int, " type=", shoot_type_int, " pos=", spawn)
@@ -202,6 +203,9 @@ func remote_spawn_projectile(peer_id : Variant, shot_speed : float, shoot_type :
 	# set spawn position
 	if p is Node3D:
 		p.global_position = spawn
+		# face direction for visual accuracy
+		if dir != Vector3.ZERO:
+			p.look_at(spawn + dir.normalized(), Vector3.UP)
 	add_child(p, true)
 	# ensure projectile has owner context
 	if p.has_method("spawn_projectile"):
@@ -213,9 +217,12 @@ func remote_spawn_projectile(peer_id : Variant, shot_speed : float, shoot_type :
 		if player != null:
 			shoot_dir = -player.global_transform.basis.z
 	if p is RigidBody3D:
-		p.linear_velocity = shoot_dir.normalized() * shot_speed
+		p.linear_velocity = shoot_dir.normalized() * shot_speed + vel
 		if p is Bomb:
 			p.linear_velocity.y += 6
+		elif p is Rocket:
+			if "addl_vel" in p:
+				p.addl_vel = vel
 
 func _parse_vec3(value : Variant) -> Vector3:
 	if value is Vector3:

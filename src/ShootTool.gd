@@ -227,10 +227,13 @@ func _physics_process(delta : float) -> void:
 					if cam != null:
 						direction = -cam.global_transform.basis.z
 					var adapter := _get_node_adapter()
+					var player_vel : Vector3 = tool_player_owner.linear_velocity
+					if tool_player_owner.seat_occupying != null:
+						player_vel = tool_player_owner.seat_occupying.linear_velocity
 					if adapter != null:
 						# Node backend: spawn locally and broadcast to other peers
 						spawn_projectile(owner_id, shot_speed, _shoot_type, spawn_pos)
-						adapter.send_rpc_call("remote_spawn_projectile", [owner_id, shot_speed, _shoot_type, spawn_pos, explosion_size, direction])
+						adapter.send_rpc_call("remote_spawn_projectile", [owner_id, shot_speed, _shoot_type, spawn_pos, explosion_size, direction, player_vel])
 					else:
 						# ENet: ask server to spawn for sync
 						spawn_projectile.rpc_id(1, owner_id, shot_speed, _shoot_type, spawn_pos)
@@ -267,10 +270,13 @@ func _physics_process(delta : float) -> void:
 				if cam != null:
 					direction = -cam.global_transform.basis.z
 				var adapter := _get_node_adapter()
+				var player_vel : Vector3 = tool_player_owner.linear_velocity
+				if tool_player_owner.seat_occupying != null:
+					player_vel = tool_player_owner.seat_occupying.linear_velocity
 				if adapter != null:
 					# Node backend: spawn locally and broadcast to other peers
 					spawn_projectile(owner_id, charged_speed, _shoot_type, spawn_pos)
-					adapter.send_rpc_call("remote_spawn_projectile", [owner_id, charged_speed, _shoot_type, spawn_pos, explosion_size, direction])
+					adapter.send_rpc_call("remote_spawn_projectile", [owner_id, charged_speed, _shoot_type, spawn_pos, explosion_size, direction, player_vel])
 				else:
 					# ENet: ask server to spawn for sync
 					if !multiplayer.is_server():
