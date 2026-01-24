@@ -805,6 +805,8 @@ func _ready() -> void:
 
 		# only execute on local player
 		if not is_local_player:
+			# Still build tool inventory locally so remote tool visuals can sync
+			get_tool_inventory().reset()
 			print("[RigidPlayer] 🚫 Not local player, skipping initialization")
 			return
 
