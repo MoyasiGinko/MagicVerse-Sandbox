@@ -31,6 +31,15 @@ func _is_local_authority() -> bool:
 		return player_owner.is_local_player
 	return is_multiplayer_authority()
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
 @onready var editor : Editor
 @onready var editor_canvas : EditorCanvas = get_tree().current_scene.get_node("EditorCanvas")
 @onready var select_area : Area3D = $SelectArea
@@ -136,7 +145,11 @@ func _on_property_updated(properties : Dictionary) -> void:
 					hovered_editable_object.set_property(property, hovered_item_properties[property])
 
 					if type == ToolType.PLAYER:
-						hovered_editable_object.sync_properties.rpc(hovered_editable_object.properties_as_dict())
+						var adapter := _get_node_adapter()
+						if adapter != null:
+							adapter.send_rpc_call("sync_tbw_obj_properties", [hovered_editable_object.get_path(), hovered_editable_object.properties_as_dict()])
+						else:
+							hovered_editable_object.sync_properties.rpc(hovered_editable_object.properties_as_dict())
 		else:
 			selected_item_properties = properties
 			update_subtitle()
@@ -373,7 +386,11 @@ func copy_grabbed() -> void:
 func delete_grabbed() -> void:
 	for brick : Node in grabbed:
 		if brick is Brick:
-			brick.despawn.rpc(true)
+			var adapter := _get_node_adapter()
+			if adapter != null:
+				adapter.send_rpc_call("remote_delete_tbw", [brick.get_path(), true])
+			else:
+				brick.despawn.rpc(true)
 	grabbed = []
 
 var save_grabbed_name_lineedit : LineEdit = null
@@ -392,7 +409,12 @@ func save_grabbed() -> void:
 
 func paste_grabbed() -> void:
 	if copied_lines.size() > 0 && preview != null:
-		Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, copied_lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
+		var adapter := _get_node_adapter()
+		if adapter != null:
+			adapter.send_rpc_call("ask_server_to_load_building", [Global.display_name, copied_lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation])
+			Global.get_world()._server_load_building(PackedStringArray(copied_lines), get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, null, preview.rotation)
+		else:
+			Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, copied_lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
 
 func _physics_process(delta : float) -> void:
 	if !_is_local_authority(): return
@@ -479,13 +501,24 @@ func _physics_process(delta : float) -> void:
 					if select_area != null:
 						# bricks, decor objects
 						for body in select_area.get_overlapping_bodies():
-							if body is Brick || body is TBWObject:
-								# sync despawns in multiplayer
-								if type == ToolType.PLAYER && body is Brick:
-									body.despawn.rpc()
-								if type == ToolType.PLAYER && body is TBWObject:
-									return
-								body.queue_free()
+								if body is Brick:
+									# sync despawns in multiplayer
+									if type == ToolType.PLAYER:
+										var adapter := _get_node_adapter()
+										if adapter != null:
+											adapter.send_rpc_call("remote_delete_tbw", [body.get_path(), true])
+										else:
+											body.despawn.rpc()
+									body.queue_free()
+									continue
+								if body is TBWObject:
+									if type == ToolType.PLAYER:
+										return
+									var adapter_del := _get_node_adapter()
+									if adapter_del != null:
+										adapter_del.send_rpc_call("remote_delete_tbw", [body.get_path(), false])
+									else:
+										body.queue_free()
 								# clear list
 								property_editor.clear_list()
 								property_editor.editing_hovered = false
@@ -558,7 +591,12 @@ func _physics_process(delta : float) -> void:
 							if selected_item_name_internal.split(";").size() > 1:
 								var lines := _load_selected_building_path_lines()
 								if lines.size() > 0:
-									Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
+									var adapter := _get_node_adapter()
+									if adapter != null:
+										adapter.send_rpc_call("ask_server_to_load_building", [Global.display_name, lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation])
+										Global.get_world()._server_load_building(PackedStringArray(lines), get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, null, preview.rotation)
+									else:
+										Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, lines, get_viewport().get_camera_3d().controlled_cam_pos as Vector3, false, preview.rotation)
 								else:
 									UIHandler.show_alert("Building not found or corrupt!", 8, false, UIHandler.alert_colour_error)
 
@@ -590,8 +628,14 @@ func _physics_process(delta : float) -> void:
 									line += str(type)
 									for p : String in inst.properties_to_save:
 										line += str(" ; ", p , ":", inst.get(p))
-									Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, [line], Vector3.ZERO, true)
-									inst.queue_free()
+									var adapter := _get_node_adapter()
+									if adapter != null:
+										adapter.send_rpc_call("ask_server_to_load_building", [Global.display_name, [line], Vector3.ZERO, true])
+										Global.get_world()._server_load_building(PackedStringArray([line]), Vector3.ZERO, true)
+										inst.queue_free()
+									else:
+										Global.get_world().ask_server_to_load_building.rpc_id(1, Global.display_name, [line], Vector3.ZERO, true)
+										inst.queue_free()
 						# if trying to spawn a brick in an invalid location
 						# and not dragging
 						elif !$InvalidAudio.playing && Input.is_action_just_released("click"):

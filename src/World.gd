@@ -136,6 +136,26 @@ func remote_tool_reset(peer_id : int) -> void:
 		return
 	inv.reset()
 
+func remote_add_tool(peer_id : Variant, tool_idx : Variant, ammo : int = -1, params : Dictionary = {}) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var tool_idx_int := _to_int(tool_idx)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	var inv := player.get_tool_inventory()
+	if inv == null:
+		return
+	inv.add_tool(tool_idx_int, ammo, params)
+
+func remote_delete_tbw(obj_path : String, despawn : bool = false) -> void:
+	var node := get_node_or_null(obj_path)
+	if node == null:
+		return
+	if node is Brick:
+		node.despawn(despawn)
+	else:
+		node.queue_free()
+
 func _find_tool_for_player(peer_id : int, tool_node_name : String, tool_label : String) -> Tool:
 	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
 	if player == null:
@@ -157,15 +177,19 @@ func remote_melee_swing(peer_id : int, tool_node_name : String, tool_label : Str
 	if tool != null and tool is MeleeTool:
 		tool.swing()
 
-func remote_pulse_beam(peer_id : int, tool_node_name : String, tool_label : String, start : Vector3, end : Vector3) -> void:
-	print("[World] ⚡ remote_pulse_beam peer=", peer_id, " tool=", tool_node_name)
-	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+func remote_pulse_beam(peer_id : Variant, tool_node_name : String, tool_label : String, start : Variant, end : Variant) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var start_vec := _parse_vec3(start)
+	var end_vec := _parse_vec3(end)
+	print("[World] ⚡ remote_pulse_beam peer=", peer_id_int, " tool=", tool_node_name)
+	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
-		tool.update_beam(start, end)
+		tool.update_beam(start_vec, end_vec)
 
-func remote_pulse_beam_active(peer_id : int, tool_node_name : String, tool_label : String, mode : bool) -> void:
-	print("[World] ⚡ remote_pulse_beam_active peer=", peer_id, " tool=", tool_node_name, " mode=", mode)
-	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+func remote_pulse_beam_active(peer_id : Variant, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	var peer_id_int := _to_int(peer_id)
+	print("[World] ⚡ remote_pulse_beam_active peer=", peer_id_int, " tool=", tool_node_name, " mode=", mode)
+	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
 		tool.update_beam_active(mode)
 
@@ -788,8 +812,10 @@ func clear_bricks() -> void:
 
 # server places bricks
 @rpc("any_peer", "call_local", "reliable")
-func ask_server_to_load_building(name_from : String, lines : Array, b_position : Vector3, use_global_position := false, placement_rotation : Vector3 = Vector3.ZERO) -> void:
+func ask_server_to_load_building(name_from : String, lines : Array, b_position : Variant, use_global_position := false, placement_rotation : Variant = Vector3.ZERO) -> void:
 	if !multiplayer.is_server(): return
+	var pos := _parse_vec3(b_position)
+	var rot := _parse_vec3(placement_rotation)
 	# buildings are 3 lines or greater
 	if lines.size() > 2:
 		if Time.get_ticks_msec() - last_tbw_load_time < 5000 && Global.get_world().get_current_map() is not Editor:
@@ -798,7 +824,7 @@ func ask_server_to_load_building(name_from : String, lines : Array, b_position :
 	last_tbw_load_time = Time.get_ticks_msec()
 	if Global.server_mode():
 		CommandHandler.submit_command.rpc("Alert", str(name_from, " placed building at: ", b_position, ". Number of objects: ", lines.size()), 1)
-	_server_load_building(lines, b_position, use_global_position, null, placement_rotation)
+	_server_load_building(lines, pos, use_global_position, null, rot)
 
 func _server_load_building(lines : PackedStringArray, b_position : Vector3, use_global_position := false, container : Node3D = null, placement_rotation : Vector3 = Vector3.ZERO) -> void:
 	var count_start : int = 0

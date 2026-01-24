@@ -78,7 +78,7 @@ func _ready() -> void:
 	respawn_timer.wait_time = respawn_time
 	$Area3D.connect("body_entered", _on_body_entered)
 	set_available_text()
-	
+
 	set_mesh()
 
 func set_mesh() -> void:
@@ -130,7 +130,7 @@ func _take_pickup(body : RigidPlayer) -> void:
 			var newhealth : int = clamp(body.get_health() + ammo, 0, body.max_health)
 			body.set_health(newhealth)
 	# only run on auth
-	elif body.get_multiplayer_authority() == multiplayer.get_unique_id():
+	elif _is_pickup_local_owner(body):
 		var tool_inv : ToolInventory = body.get_tool_inventory()
 		var result : Tool = null
 		var tool_idx : ToolInventory.ToolIdx = ToolInventory.ToolIdx.RocketTool
@@ -172,7 +172,12 @@ func _take_pickup(body : RigidPlayer) -> void:
 					result.ammo += ammo
 					result.update_ammo_display()
 			else:
-				tool_inv.add_tool.rpc(tool_idx, ammo)
+				var adapter := _get_node_adapter()
+				if adapter != null:
+					tool_inv.add_tool(tool_idx, ammo)
+					adapter.send_rpc_call("remote_add_tool", [body.get_multiplayer_authority(), tool_idx, ammo])
+				else:
+					tool_inv.add_tool.rpc(tool_idx, ammo)
 	respawn_timer.start()
 	await respawn_timer.timeout
 	# reset label
@@ -188,6 +193,22 @@ func _take_pickup(body : RigidPlayer) -> void:
 			_take_pickup(check_body as RigidPlayer)
 			# don't keep iterating once we give the item away
 			return
+
+func _is_pickup_local_owner(body : RigidPlayer) -> bool:
+	# Node backend: match local player flag; ENet: match multiplayer authority
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		return body.is_local_player
+	return body.get_multiplayer_authority() == multiplayer.get_unique_id()
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
 
 func set_available_text() -> void:
 	# different text for flamethrower and extinguisher
