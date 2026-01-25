@@ -92,7 +92,29 @@ func change_player_team(who : RigidPlayer, what_team : Team) -> void:
 	who.update_info.rpc_id(who.get_multiplayer_authority())
 
 # Called from Node backend adapter to sync tool visuals across peers
-func remote_tool_visual(peer_id : int, tool_node_name : String, tool_label : String, mode : bool) -> void:
+func remote_tool_visual(peer_id : Variant, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	var inv := player.get_tool_inventory()
+	if inv == null:
+		return
+	var tool: Tool = inv.get_node_or_null(tool_node_name) as Tool
+	if tool == null:
+		for t: Tool in inv.get_tools():
+			if t.ui_tool_name == tool_label:
+				tool = t
+				break
+	if tool != null:
+		tool.show_tool_visual(mode)
+		return
+	_retry_tool_visual(peer_id_int, tool_node_name, tool_label, mode, 4)
+
+func _retry_tool_visual(peer_id : int, tool_node_name : String, tool_label : String, mode : bool, attempts : int) -> void:
+	if attempts <= 0:
+		return
+	await get_tree().create_timer(0.1).timeout
 	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
 	if player == null:
 		return
@@ -107,6 +129,8 @@ func remote_tool_visual(peer_id : int, tool_node_name : String, tool_label : Str
 				break
 	if tool != null:
 		tool.show_tool_visual(mode)
+		return
+	_retry_tool_visual(peer_id, tool_node_name, tool_label, mode, attempts - 1)
 
 func remote_explosion(position : Variant, explosion_size : float, from_whom_id : int) -> void:
 	var pos := _parse_vec3(position)
