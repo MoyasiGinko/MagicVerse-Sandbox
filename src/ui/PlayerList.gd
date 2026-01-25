@@ -19,11 +19,13 @@ signal player_removed
 
 @onready var player_list_entry : PackedScene = preload("res://data/scene/ui/PlayerListEntry.tscn")
 @export var show_team_names := true
+var _adapter_hooked := false
 
 func _ready() -> void:
 	find_players()
 	multiplayer.peer_disconnected.connect(remove_player_by_id)
 	Global.connect("player_list_information_update", update_list)
+	refresh_from_adapter()
 
 func find_players() -> void:
 	# add existing players if this is added to scene later.
@@ -31,6 +33,21 @@ func find_players() -> void:
 	# in add_player.
 	for p : RigidPlayer in Global.get_world().rigidplayer_list:
 		add_player(p)
+	# also try to populate from node backend room members if available
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		_populate_from_adapter(adapter)
+
+func refresh_from_adapter() -> void:
+	var adapter := _get_node_adapter()
+	if adapter == null:
+		return
+	if !_adapter_hooked:
+		adapter.peer_joined_with_name.connect(_on_peer_joined_node)
+		adapter.peer_disconnected.connect(_on_peer_left_node)
+		_adapter_hooked = true
+	_remove_duplicate_entries()
+	_populate_from_adapter(adapter)
 
 func update_list() -> void:
 	for entry in get_children():
@@ -118,6 +135,11 @@ func add_player_from_server(peer_id: int, player_name: String, team: int = 0) ->
 		if l.name == str(peer_id):
 			print("[PlayerList] ⚠️ Player already in list, skipping")
 			return
+		# guard against duplicate display names for same peer
+		var label: Label = l.get_node_or_null("HBoxContainer/Label")
+		if label and label.text == player_name and str(peer_id).is_valid_int() and l.name.is_valid_int() and int(l.name) == peer_id:
+			print("[PlayerList] ⚠️ Duplicate player name entry, skipping")
+			return
 
 	# Check if player_list_entry scene loaded correctly
 	if player_list_entry == null:
@@ -159,9 +181,50 @@ func add_player_from_server(peer_id: int, player_name: String, team: int = 0) ->
 
 func remove_player_by_id(id : int) -> void:
 	remove_player(Global.get_world().get_node_or_null(str(id)) as RigidPlayer)
+	_remove_player_entry_by_id(id)
 
 func remove_player(player : RigidPlayer) -> void:
 	if player:
 		for l in get_children():
 			if l.name == str(player.name):
 				l.queue_free()
+
+func _remove_duplicate_entries() -> void:
+	var seen := {}
+	for l in get_children():
+		var key := l.name
+		if seen.has(key):
+			l.queue_free()
+			continue
+		seen[key] = true
+
+func _remove_player_entry_by_id(peer_id: int) -> void:
+	for l in get_children():
+		if l.name == str(peer_id):
+			l.queue_free()
+
+func _on_peer_joined_node(peer_id: int, peer_name: String) -> void:
+	add_player_from_server(peer_id, peer_name, 0)
+
+func _on_peer_left_node(peer_id: int) -> void:
+	_remove_player_entry_by_id(peer_id)
+
+func _populate_from_adapter(adapter: MultiplayerNodeAdapter) -> void:
+	var peers := adapter.get_all_peers_with_names()
+	for peer_data: Variant in peers:
+		if typeof(peer_data) == TYPE_DICTIONARY:
+			var peer_dict: Dictionary = peer_data as Dictionary
+			var peer_id_val: int = peer_dict.get("peerId", 0) as int
+			var peer_name: String = peer_dict.get("name", "Unknown") as String
+			if peer_id_val <= 0:
+				continue
+			add_player_from_server(peer_id_val, peer_name, 0)
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null

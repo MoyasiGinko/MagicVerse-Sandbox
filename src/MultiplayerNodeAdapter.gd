@@ -128,11 +128,15 @@ func _handle_room_joined(data: Dictionary) -> void:
 	_pending_members.clear()  # Clear pending - Main.gd will spawn existing members from room_members
 	room_members.clear()
 
+	var seen_ids := {}
 	for member: Variant in members:
 		if typeof(member) == TYPE_DICTIONARY:
 			var member_dict: Dictionary = member as Dictionary
 			var peer_id: int = member_dict.get("peerId", 0) as int
 			var peer_name: String = member_dict.get("name", "Unknown") as String
+			if seen_ids.has(peer_id):
+				continue
+			seen_ids[peer_id] = true
 
 			# Add all members to room_members (including self)
 			room_members.append({"peerId": peer_id, "name": peer_name})
@@ -394,22 +398,36 @@ func get_all_peers_with_names() -> Array:
 	"""Return array of all peers including self, with their names and IDs"""
 	var peers: Array = []
 
-	# Add self
-	peers.append({
-		"peerId": _peer_id,
-		"name": Global.display_name,
-		"is_self": true
-	})
-
-	# Add pending members (peers that joined the room)
-	for member_data: Variant in _pending_members:
+	# Prefer authoritative room_members list from backend
+	for member_data: Variant in room_members:
 		if typeof(member_data) == TYPE_DICTIONARY:
 			var member: Dictionary = member_data as Dictionary
+			var pid: int = member.get("peerId", 0) as int
+			var pname: String = member.get("name", "Unknown") as String
+			if pid <= 0:
+				continue
 			peers.append({
-				"peerId": member.get("peerId", 0),
-				"name": member.get("name", "Unknown"),
-				"is_self": false
+				"peerId": pid,
+				"name": pname,
+				"is_self": pid == _peer_id
 			})
+
+	# If room_members is empty (early join), fall back to pending/self
+	if peers.is_empty():
+		if _peer_id > 0:
+			peers.append({
+				"peerId": _peer_id,
+				"name": Global.display_name,
+				"is_self": true
+			})
+		for member_data: Variant in _pending_members:
+			if typeof(member_data) == TYPE_DICTIONARY:
+				var member: Dictionary = member_data as Dictionary
+				peers.append({
+					"peerId": member.get("peerId", 0),
+					"name": member.get("name", "Unknown"),
+					"is_self": false
+				})
 
 	return peers
 
@@ -431,6 +449,12 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	"""Handle notification that a new peer joined the room"""
 	var peer_id: int = data.get("peerId", 0) as int
 	var name: String = data.get("name", "Unknown") as String
+	# Ignore duplicate/self join notifications
+	if peer_id == _peer_id:
+		return
+	for member: Dictionary in room_members:
+		if member.get("peerId", -1) == peer_id:
+			return
 
 	print("[NodeAdapter] 👥 Peer joined: peerId=", peer_id, " name=", name)
 	print("[NodeAdapter] 🔍 Attempting to spawn remote player...")

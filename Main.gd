@@ -860,6 +860,7 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 		# Wait for backend to confirm room join
 		print("[Main] ⏳ Waiting for room_joined confirmation...")
 		await node_peer.room_joined
+		_refresh_member_lists()
 	else:
 		print("[Main] 📤 Creating new room via WebSocket...")
 		node_peer.create_room(str(server_version), Global.display_name)
@@ -919,6 +920,7 @@ func _setup_websocket_client(room_code: String) -> void:
 	print("[Main] ⏳ Waiting for room_joined confirmation...")
 	await node_peer.room_joined
 	print("[Main] ✅ Room joined, peer_id=", node_peer.get_unique_peer_id())
+	_refresh_member_lists()
 
 	print("[Main] ✅ Client setup complete")
 
@@ -1005,6 +1007,12 @@ func _load_world_and_start(map_name: String) -> void:
 			print("[Main] ✅ Player list populated")
 		else:
 			print("[Main] ⚠️ PlayerList not found or missing method")
+	_refresh_member_lists()
+
+func _refresh_member_lists() -> void:
+	var game_list: Node = get_node_or_null("GameCanvas/PlayerList")
+	if game_list and game_list.has_method("refresh_from_adapter"):
+		game_list.call("refresh_from_adapter")
 
 func _reset_host_buttons() -> void:
 	host_button.text = "Host server"

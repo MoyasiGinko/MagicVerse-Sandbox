@@ -616,6 +616,7 @@ text = "Join Room"
 script = ExtResource("2_o48rt")
 json_text = "ui/join_room"
 
+
 [node name="HostSettingsMenu" type="VBoxContainer" parent="."]
 visible = false
 custom_minimum_size = Vector2(308, 2.08165e-12)
