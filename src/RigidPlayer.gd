@@ -805,6 +805,11 @@ func _ready() -> void:
 
 		# only execute on local player
 		if not is_local_player:
+			# Node backend: keep remote players frozen until first state sync
+			if adapter != null:
+				freeze = true
+				gravity_scale = 0
+				linear_velocity = Vector3.ZERO
 			# Still build tool inventory locally so remote tool visuals can sync
 			get_tool_inventory().reset()
 			print("[RigidPlayer] 🚫 Not local player, skipping initialization")
@@ -816,6 +821,9 @@ func _ready() -> void:
 			adapter.send_rpc_call("remote_tool_reset", [int(name)])
 		else:
 			get_tool_inventory().reset.rpc()
+		# Prevent falling before the world finishes loading (Node backend join timing)
+		if adapter != null:
+			freeze = true
 		var camera_to_set: Camera3D = get_viewport().get_camera_3d()
 		print("[RigidPlayer] 📹 Setting camera for local player ", name, " - camera target will be set to my target node")
 		set_camera(camera_to_set)
@@ -830,6 +838,8 @@ func _ready() -> void:
 		# set default spawns
 		set_spawns(world.get_spawnpoint_for_team(team))
 		go_to_spawn()
+		if adapter != null:
+			freeze = false
 		# hide your own name label
 		name_label.visible = false
 		# in case we were not present on client when server sent
@@ -859,6 +869,7 @@ func _on_tbw_loaded() -> void:
 		set_spawns(world.get_spawnpoint_for_team(team))
 		if !(Global.get_world().get_current_map() is Editor):
 			go_to_spawn()
+			freeze = false
 	else:
 		# For ENet backend, use RPC calls
 		set_spawns.rpc_id(get_multiplayer_authority(), world.get_spawnpoint_for_team(team))
@@ -872,7 +883,13 @@ func set_lifter_particles(mode : bool) -> void:
 func _physics_process(delta : float) -> void:
 	# spawned dummies check idle (for menu animation)
 	if spawn_as_dummy:
+		# Keep menu dummy locked in place
+		freeze = true
+		gravity_scale = 0
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
 		check_idle()
+		return
 
 	# Determine if this is the local player (for input processing)
 	# Note: is_local_player is a class member variable, we just need to recalculate it each frame
@@ -984,6 +1001,10 @@ func check_idle() -> void:
 @rpc("call_local")
 func play_idle_animation() -> void:
 	animator.set("parameters/IdleOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	if is_local_player:
+		var adapter := _get_node_adapter()
+		if adapter != null:
+			adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "idle"])
 
 func play_jump_particles() -> void:
 	if jump_particles == null:
@@ -1001,6 +1022,8 @@ var standing_on_object_last_pos : Vector3 = Vector3.ZERO
 var init_velocity := Vector3.ZERO
 # Manages movement
 func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
+	if spawn_as_dummy:
+		return
 	# handle movement
 	if is_local_player:
 		# executes on owner only
@@ -1428,6 +1451,20 @@ func change_state(state : int) -> void:
 func enter_state() -> void:
 	# only execute on yourself
 	if !is_local_player: return
+	# Node backend: broadcast animation triggers for remote clients
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		match _state:
+			AIR:
+				adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "air_jump"])
+			HIGH_JUMP:
+				adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "high_jump"])
+			DIVE:
+				adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "dive"])
+			ROLL:
+				adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "roll"])
+			SWIMMING_DASH:
+				adapter.send_rpc_call("remote_anim_event", [_get_local_peer_id(), "swim_dash"])
 
 	# DEBUG
 	if debug_menu.visible:
@@ -2096,6 +2133,46 @@ func despawn() -> void:
 	get_tool_inventory().delete_all_tools()
 	Global.get_world().remove_player_from_list(self)
 	queue_free()
+
+func apply_remote_anim_event(event_name : String) -> void:
+	if is_local_player:
+		return
+	if animator == null:
+		return
+	match event_name:
+		"idle":
+			animator.set("parameters/IdleOneShot/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+		"air_jump":
+			animator.set("parameters/TimeSeek/seek_request", 0.0)
+			animator["parameters/BlendJump/blend_amount"] = 1.0
+		"high_jump":
+			animator.set("parameters/TimeSeekHighJump/seek_request", 0.0)
+			animator["parameters/BlendHighJump/blend_amount"] = 1.0
+		"dive":
+			animator.set("parameters/TimeSeekDive/seek_request", 0.0)
+			animator["parameters/BlendDive/blend_amount"] = 1.0
+		"roll":
+			animator["parameters/BlendRoll/blend_amount"] = 1.0
+		"swim_dash":
+			animator.set("parameters/TimeSeekSwimDash/seek_request", 0.0)
+			animator["parameters/BlendSwimDash/blend_amount"] = 1.0
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
+func _get_local_peer_id() -> int:
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		if name.is_valid_int():
+			return int(name)
+		return adapter.get_unique_peer_id()
+	return get_multiplayer_authority()
 func _send_player_state_to_server() -> void:
 	"""Send local player state to server for multiplayer sync"""
 	# Try to find the MultiplayerNodeAdapter using multiple methods

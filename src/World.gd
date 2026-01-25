@@ -136,6 +136,13 @@ func remote_tool_reset(peer_id : int) -> void:
 		return
 	inv.reset()
 
+func remote_anim_event(peer_id : Variant, event_name : String) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	player.apply_remote_anim_event(event_name)
+
 func remote_add_tool(peer_id : Variant, tool_idx : Variant, ammo : int = -1, params : Dictionary = {}) -> void:
 	var peer_id_int := _to_int(peer_id)
 	var tool_idx_int := _to_int(tool_idx)
