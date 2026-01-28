@@ -60,6 +60,7 @@ func _on_body_entered(body : Node3D) -> void:
 				# only apply on the local target
 				if body.is_local_player:
 					body.light_fire(from_id, 8)
+					adapter.send_rpc_call("remote_light_fire", [int(body.name), from_id, 0])
 				elif player_from != null and player_from is RigidPlayer and (player_from as RigidPlayer).is_local_player:
 					adapter.send_rpc_call("remote_light_fire", [int(body.name), from_id, 8])
 			else:
