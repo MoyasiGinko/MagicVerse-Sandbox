@@ -160,6 +160,39 @@ func remote_tool_reset(peer_id : int) -> void:
 		return
 	inv.reset()
 
+func remote_set_health(peer_id : Variant, new_health : int, cause_of_death : int = -1, executor_id : int = -1) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	if player.is_local_player:
+		player.set_health(new_health, cause_of_death, executor_id)
+	else:
+		player._receive_server_health(new_health, executor_id)
+
+func remote_apply_damage(peer_id : Variant, amount : int, cause_of_death : int = -1, executor_id : int = -1, override_invincibility : bool = false) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	if player.is_local_player:
+		player.reduce_health(amount, cause_of_death, executor_id, override_invincibility)
+
+func remote_player_explode(peer_id : Variant, explosion_position : Variant, from_whom : int = 1, explosion_force : float = 4.0) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	if player.is_local_player:
+		player.explode(_parse_vec3(explosion_position), from_whom, explosion_force)
+
+func remote_set_last_hit(peer_id : Variant, by_id : int) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	player.set_last_hit_by_id(by_id)
+
 func remote_anim_event(peer_id : Variant, event_name : String) -> void:
 	var peer_id_int := _to_int(peer_id)
 	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer

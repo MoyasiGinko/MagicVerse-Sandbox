@@ -71,25 +71,31 @@ func _set_tool_audio_playing(mode : bool) -> void:
 
 var beam_active_time : int = 0
 func _physics_process(delta : float) -> void:
-	if multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if multiplayer.is_server() or (adapter != null and _is_local_authority()):
 		# timer for lighting player/items on fire with sustained fire
 		if beam_active:
 			beam_active_time += 1
 		else:
 			beam_active_time = 0
 
-		for body in beam_area.get_overlapping_bodies():
+		for body: Node3D in beam_area.get_overlapping_bodies():
 			# make sure we don't damage ourselves
 			if body is RigidPlayer:
 				var body_player : RigidPlayer = body as RigidPlayer
 				# Skip if this is the tool owner
 				if !_do_we_own_player(body_player) && damage_cooldown < 1:
 					var executor_id : int = _get_tool_owner_peer_id()
-					body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
-					if beam_active_time > 35:
-						body_player.light_fire.rpc(executor_id, 0)
+					if adapter != null:
+						adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), 1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true])
+						if beam_active_time > 35:
+							adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])
+					else:
+						body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
+						if beam_active_time > 35:
+							body_player.light_fire.rpc(executor_id, 0)
 					damage_cooldown = 6
-			elif body is Bomb || body is Rocket:
+			elif body is Bomb or body is Rocket:
 				if beam_active_time > 35:
 					body.explode.rpc(_get_tool_owner_peer_id())
 			elif body is ExplosiveBrick:
@@ -100,9 +106,9 @@ func _physics_process(delta : float) -> void:
 	if is_multiplayer_authority():
 		if beam_active:
 			# for all others, sync at physics fps
-			var adapter := _get_node_adapter()
-			if adapter != null:
-				adapter.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
+			var adapter_sync := _get_node_adapter()
+			if adapter_sync != null:
+				adapter_sync.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
 			else:
 				update_beam.rpc(start, end)
 			if beam_ammo_cooldown < 1:

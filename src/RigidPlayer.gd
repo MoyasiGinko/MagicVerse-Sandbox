@@ -196,7 +196,8 @@ func light_fire(from_who_id : int = -1, initial_damage : int = 1) -> void:
 		on_fire = true
 		# visual fire
 		fire.light()
-		if _is_server():
+		var adapter := _get_node_adapter()
+		if _is_server() or (adapter != null and is_local_player):
 			# take initial damage
 			reduce_health(initial_damage, CauseOfDeath.FIRE, from_who_id)
 			# 2 damage / s
@@ -209,14 +210,18 @@ func light_fire(from_who_id : int = -1, initial_damage : int = 1) -> void:
 			fire_timer.start()
 			# extinguish after time
 			await get_tree().create_timer(4).timeout
-			extinguish_fire.rpc()
+			if adapter != null:
+				extinguish_fire()
+			else:
+				extinguish_fire.rpc()
 
 # Extinguishes the fire on this player, and deletes the fire timer.
 @rpc("any_peer", "call_local", "reliable")
 func extinguish_fire() -> void:
 	if on_fire:
 		on_fire = false
-		if multiplayer.is_server():
+		var adapter := _get_node_adapter()
+		if multiplayer.is_server() or adapter != null:
 			if has_node("FireTimer"):
 				if $FireTimer.is_connected("timeout", reduce_health):
 					$FireTimer.disconnect("timeout", reduce_health)
@@ -306,8 +311,9 @@ func _on_body_entered(body : Node3D) -> void:
 		if body is ButtonBrick:
 			body.stepped.rpc(get_path())
 
-	# stuff handled by the server
-	if multiplayer.is_server():
+	# stuff handled by the server (or local authority in Node backend)
+	var adapter := _get_node_adapter()
+	if multiplayer.is_server() or (adapter != null and is_local_player):
 		# trip when hit by something fast, unless we're standing on it
 		if (body is RigidBody3D) && !(body is RigidPlayer):
 			if (body.linear_velocity.length() + body.angular_velocity.length()) > 4:
@@ -350,17 +356,25 @@ func _is_friendly_fire(other_player : RigidPlayer) -> bool:
 
 var time_last_reduced_health : int = 0
 func reduce_health(amount : int, potential_cause_of_death : int = -1, potential_executor_id : int = -1, override_invincibility_period : bool = false) -> void:
-	# server handles all player health
-	if !multiplayer.is_server(): return
+	# server handles all player health (Node backend uses adapter sync)
+	var adapter := _get_node_adapter()
+	if adapter != null and !is_local_player:
+		return
+	if !multiplayer.is_server() and adapter == null:
+		return
 	# invincibility period
 	if (Time.get_ticks_msec() - time_last_reduced_health > 499) || override_invincibility_period:
 		# from server: update display for client and all players
 		set_health(get_health() - amount, potential_cause_of_death, potential_executor_id)
 		time_last_reduced_health = Time.get_ticks_msec()
+		# Node backend: broadcast new health to peers
+		if adapter != null:
+			adapter.send_rpc_call("remote_set_health", [int(name), get_health(), potential_cause_of_death, potential_executor_id])
 
 @rpc("any_peer", "call_local", "reliable")
 func _receive_server_health(new : int, potential_executor_id : int = -1) -> void:
-	if is_multiplayer_authority():
+	var adapter := _get_node_adapter()
+	if (adapter != null and is_local_player) or (adapter == null and is_multiplayer_authority()):
 		# flash health on damage
 		if new < health:
 			health_bar.get_node("AnimationPlayer").play("flash_health")
@@ -405,12 +419,18 @@ func set_max_health(new : int) -> void:
 
 # ONLY RUNS AS SERVER
 func set_health(new : int, potential_cause_of_death : int = -1, potential_executor_id : int = -1) -> void:
-	if !multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if adapter != null and !is_local_player:
+		return
+	if !multiplayer.is_server() and adapter == null:
 		return
 
 	if !invulnerable && !dead:
 		# send updated health to clients
-		_receive_server_health.rpc(new, potential_executor_id)
+		if adapter != null:
+			_receive_server_health(new, potential_executor_id)
+		else:
+			_receive_server_health.rpc(new, potential_executor_id)
 		# server will keep track of this
 		health = new
 
@@ -1977,16 +1997,24 @@ func explode(explosion_position : Vector3, from_whom : int = 1, _explosion_force
 	# only run on server and auth
 	if multiplayer.get_remote_sender_id() != 1 && multiplayer.get_remote_sender_id() != 0:
 		return
+	var adapter := _get_node_adapter()
+	if adapter != null and !is_local_player:
+		return
 	# default death type is explosion
 	var cause_of_death : CauseOfDeath = CauseOfDeath.EXPLOSION
 	# reduce health depending on distance of explosion; notify health handler who it was from
 	var offset_pos : Vector3 = Vector3(global_position.x, global_position.y + 0.4, global_position.z)
-	if multiplayer.is_server():
+	if multiplayer.is_server() or adapter != null:
 		set_health(get_health() - (28 / int(1 + offset_pos.distance_to(explosion_position))), cause_of_death, from_whom)
 		# only trip / light fire if we are not dead
 		if get_health() > 0:
-			change_state.rpc_id(get_multiplayer_authority(), TRIPPED)
-			light_fire.rpc(from_whom)
+			if adapter != null:
+				change_state(TRIPPED)
+				light_fire(from_whom)
+				adapter.send_rpc_call("remote_set_health", [int(name), get_health(), cause_of_death, from_whom])
+			else:
+				change_state.rpc_id(get_multiplayer_authority(), TRIPPED)
+				light_fire.rpc(from_whom)
 
 	# run on authority (client who exploded)
 	if !is_multiplayer_authority(): return
@@ -2000,20 +2028,28 @@ func explode(explosion_position : Vector3, from_whom : int = 1, _explosion_force
 
 # server side
 func update_kills(new_kills : int) -> void:
-	if !multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if !multiplayer.is_server() and adapter == null:
 		return
 	if (new_kills > kills):
 		emit_signal("kills_increased")
 	kills = new_kills
-	_receive_server_kills.rpc(new_kills)
+	if adapter != null:
+		_receive_server_kills(new_kills)
+	else:
+		_receive_server_kills.rpc(new_kills)
 	Global.update_player_list_information()
 
 # server side
 func update_deaths(new_deaths : int) -> void:
-	if !multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if !multiplayer.is_server() and adapter == null:
 		return
 	deaths = new_deaths
-	_receive_server_deaths.rpc(new_deaths)
+	if adapter != null:
+		_receive_server_deaths(new_deaths)
+	else:
+		_receive_server_deaths.rpc(new_deaths)
 	Global.update_player_list_information()
 
 # server side

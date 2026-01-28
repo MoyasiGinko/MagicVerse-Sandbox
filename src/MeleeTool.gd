@@ -87,6 +87,7 @@ func on_hit(body : Node3D) -> void:
 			return
 
 		# only take damage if not tripped
+		var adapter := _get_node_adapter()
 		if multiplayer.is_server():
 			if body_player._state != RigidPlayer.TRIPPED:
 				var executor_id : int = _get_tool_owner_peer_id()
@@ -94,6 +95,11 @@ func on_hit(body : Node3D) -> void:
 				body_player.change_state.rpc_id(body_player.get_multiplayer_authority(), RigidPlayer.TRIPPED)
 				# running as server
 				body_player.emit_signal("hit_by_melee", self)
+		elif adapter != null and _is_local_authority():
+			if body_player._state != RigidPlayer.TRIPPED:
+				var executor_id : int = _get_tool_owner_peer_id()
+				adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), damage, RigidPlayer.CauseOfDeath.MELEE, executor_id, false])
+				adapter.send_rpc_call("remote_set_last_hit", [int(body_player.name), executor_id])
 		# only run this on the authority of who was hit (not necessarily the authority of the tool)
 		elif body_player.is_local_player:
 			# running as hit player's authority

@@ -48,14 +48,28 @@ func _on_body_entered(body : Node3D) -> void:
 			body.unjoin()
 	elif body is RigidPlayer:
 		# if we hit a player, set the player's last hit by ID to this one
+		var node_adapter := _get_node_adapter()
 		if multiplayer.is_server():
 			body.set_last_hit_by_id.rpc(get_multiplayer_authority())
 			body.change_state.rpc(RigidPlayer.TRIPPED)
 			body.reduce_health((randi() % 3) + 1, RigidPlayer.CauseOfDeath.HIT_BY_BALL, get_multiplayer_authority())
+		elif node_adapter != null and is_multiplayer_authority():
+			var dmg := (randi() % 3) + 1
+			node_adapter.send_rpc_call("remote_apply_damage", [int(body.name), dmg, RigidPlayer.CauseOfDeath.HIT_BY_BALL, get_multiplayer_authority(), false])
+			node_adapter.send_rpc_call("remote_set_last_hit", [int(body.name), get_multiplayer_authority()])
 	if is_multiplayer_authority():
 		# stepped on button
 		if body is ButtonBrick:
 			body.stepped.rpc(get_path())
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
 
 @rpc("authority", "call_local", "reliable")
 func set_colour(new : String) -> void:

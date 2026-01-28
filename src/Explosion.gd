@@ -61,7 +61,7 @@ func play_sound() -> void:
 		if e is Explosion && e != self:
 			if Time.get_ticks_msec() - e.spawn_time < 1000:
 				db_lower += 1
-	
+
 	var camera : Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
@@ -79,9 +79,24 @@ func play_sound() -> void:
 
 func explode(body : Node3D) -> void:
 	if body.has_method("explode") && !(body is Explosion) && !(body is Rocket) && !(body is Bomb):
+		var adapter := _get_node_adapter()
+		if adapter != null and body is RigidPlayer:
+			if body.is_local_player:
+				body.explode(global_position, by_whom, explosion_size)
+				body.set_last_hit_by_id(by_whom)
+			return
 		body.explode.rpc(global_position, by_whom, explosion_size)
 		# set 'last_hit_by' on player to this authority so that
 		# if a player is knocked off the map by an explosion,
 		# the point is attributed
 		if body is RigidPlayer && multiplayer.is_server():
 			body.set_last_hit_by_id.rpc(by_whom)
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
