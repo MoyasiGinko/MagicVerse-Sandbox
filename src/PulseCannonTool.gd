@@ -145,6 +145,8 @@ func update_beam(start : Vector3, end : Vector3) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func update_beam_active(mode : bool) -> void:
+	if _is_local_authority() && !mode && get_tool_active() && Input.is_action_pressed("click") && !predelete:
+		return
 	beam_mesh.visible = mode
 	beam_area_collider.disabled = !mode
 	beam_active = mode
@@ -166,6 +168,10 @@ func _process(delta : float) -> void:
 					update_beam_active(true)
 				else:
 					update_beam_active.rpc(true)
+				# ensure local beam stays visible while firing
+				beam_mesh.visible = true
+				beam_area_collider.disabled = false
+				beam_active = true
 				if (audio != null && audio_anim != null):
 					if !audio.playing || audio_anim.is_playing():
 						_set_tool_audio_playing.rpc(true)

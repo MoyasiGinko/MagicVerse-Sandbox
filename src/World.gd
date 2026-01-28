@@ -256,6 +256,9 @@ func remote_pulse_beam(peer_id : Variant, tool_node_name : String, tool_label : 
 	var start_vec := _parse_vec3(start)
 	var end_vec := _parse_vec3(end)
 	print("[World] ⚡ remote_pulse_beam peer=", peer_id_int, " tool=", tool_node_name)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player != null and player.is_local_player:
+		return
 	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
 		tool.update_beam(start_vec, end_vec)
@@ -263,6 +266,9 @@ func remote_pulse_beam(peer_id : Variant, tool_node_name : String, tool_label : 
 func remote_pulse_beam_active(peer_id : Variant, tool_node_name : String, tool_label : String, mode : bool) -> void:
 	var peer_id_int := _to_int(peer_id)
 	print("[World] ⚡ remote_pulse_beam_active peer=", peer_id_int, " tool=", tool_node_name, " mode=", mode)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player != null and player.is_local_player:
+		return
 	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
 	if tool != null and tool is PulseCannonTool:
 		tool.update_beam_active(mode)
