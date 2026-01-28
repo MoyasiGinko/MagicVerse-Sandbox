@@ -637,19 +637,31 @@ func set_health(new : int, potential_cause_of_death : int = -1, potential_execut
 			# display death feed to server
 			UIHandler.show_alert.rpc(death_message, 5, false, UIHandler.alert_colour_death)
 			# now we set the death message, change the state
-			change_state.rpc_id(get_multiplayer_authority(), DEAD)
+			if adapter != null:
+				change_state(DEAD)
+			else:
+				change_state.rpc_id(get_multiplayer_authority(), DEAD)
 			# start timer, connected to respawn
 			respawn_time.start()
 			var cur_respawn := respawn_time.wait_time
 			for second in respawn_time.wait_time:
 				# in case we instantly changed states
-				UIHandler.show_alert.rpc_id(get_multiplayer_authority(), str("Respawn in ", int(cur_respawn), "..."), 1, false, Color("#c67171"))
+				if adapter != null:
+					UIHandler.show_alert(str("Respawn in ", int(cur_respawn), "..."), 1, false, Color("#c67171"))
+				else:
+					UIHandler.show_alert.rpc_id(get_multiplayer_authority(), str("Respawn in ", int(cur_respawn), "..."), 1, false, Color("#c67171"))
 				cur_respawn -= 1
 				await get_tree().create_timer(1).timeout
 			# if we are still dead after timer, don't intercept states:
-			change_state.rpc_id(get_multiplayer_authority(), RESPAWN)
+			if adapter != null:
+				change_state(RESPAWN)
+			else:
+				change_state.rpc_id(get_multiplayer_authority(), RESPAWN)
 			dead = false
-			extinguish_fire.rpc()
+			if adapter != null:
+				extinguish_fire()
+			else:
+				extinguish_fire.rpc()
 			set_health(max_health)
 			protect_spawn()
 

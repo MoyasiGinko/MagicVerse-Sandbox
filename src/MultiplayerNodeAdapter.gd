@@ -562,9 +562,9 @@ func _handle_player_state(data: Dictionary) -> void:
 				player.global_position = current_pos.lerp(position, 0.5)  # 50% lerp for smooth sync
 			player.global_rotation = rotation
 
-			# Sync animation state
+			# Sync animation state (apply non-authority state transitions)
 			if player._state != anim_state:
-				player._state = anim_state
+				player.change_state_non_authority(anim_state)
 
 			# Apply all animation blend values directly from network data
 			if player.animator != null and not anim_data.is_empty():

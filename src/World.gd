@@ -142,6 +142,16 @@ func remote_explosion(position : Variant, explosion_size : float, from_whom_id :
 	explosion_i.set_explosion_owner(from_whom_id)
 	explosion_i.global_position = pos
 	explosion_i.play_sound()
+	# Node backend: apply explosion damage locally for the local player
+	var local_player: RigidPlayer = null
+	for player: RigidPlayer in rigidplayer_list:
+		if player.is_local_player:
+			local_player = player
+			break
+	if local_player != null:
+		var dist := local_player.global_position.distance_to(pos)
+		if dist <= explosion_size + 0.5:
+			local_player.explode(pos, from_whom_id, explosion_size)
 
 func remote_light_fire(peer_id : int, from_who_id : int, initial_damage : int) -> void:
 	print("[World] 🔥 remote_light_fire target=", peer_id, " from=", from_who_id, " dmg=", initial_damage)

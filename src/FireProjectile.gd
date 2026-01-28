@@ -38,17 +38,32 @@ func _ready() -> void:
 	super()
 
 func _on_body_entered(body : Node3D) -> void:
-	# only run on auth
-	if !is_multiplayer_authority(): return
+	var adapter := _get_node_adapter()
+	var should_execute := false
+	if adapter != null:
+		# Node backend: allow local victim or local shooter to handle hits
+		if body is RigidPlayer and (body as RigidPlayer).is_local_player:
+			should_execute = true
+		elif player_from != null and player_from is RigidPlayer and (player_from as RigidPlayer).is_local_player:
+			should_execute = true
+	else:
+		# ENet: only run on authority
+		should_execute = is_multiplayer_authority()
+	if !should_execute:
+		return
 
 	if body.has_method("light_fire"):
 		# special "from_who" arg for players
 		if body is RigidPlayer:
 			var from_id := get_multiplayer_authority()
-			var adapter := _get_node_adapter()
 			if adapter != null:
-				adapter.send_rpc_call("remote_light_fire", [int(body.name), from_id, 8])
-			body.light_fire(from_id, 8)
+				# only apply on the local target
+				if body.is_local_player:
+					body.light_fire(from_id, 8)
+				elif player_from != null and player_from is RigidPlayer and (player_from as RigidPlayer).is_local_player:
+					adapter.send_rpc_call("remote_light_fire", [int(body.name), from_id, 8])
+			else:
+				body.light_fire(from_id, 8)
 		# lower chance of lighting fire for anything that's not a player
 		else:
 			if (randi() % 10 > 8):

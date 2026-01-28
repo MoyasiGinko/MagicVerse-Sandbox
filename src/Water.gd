@@ -44,10 +44,24 @@ func set_property(property : StringName, value : Variant) -> void:
 		set_water_type(value as int)
 
 func _on_damage_timer_timeout() -> void:
-	if multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if multiplayer.is_server() or adapter != null:
 		for body in deep_area.get_overlapping_bodies():
 			if body is RigidPlayer:
-				body.reduce_health(2, RigidPlayer.CauseOfDeath.SWAMP_WATER)
+				if adapter != null:
+					if body.is_local_player:
+						body.reduce_health(2, RigidPlayer.CauseOfDeath.SWAMP_WATER)
+				else:
+					body.reduce_health(2, RigidPlayer.CauseOfDeath.SWAMP_WATER)
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
 
 func set_water_type(new_type : WaterType) -> void:
 	water_type = new_type
@@ -65,14 +79,14 @@ func _ready() -> void:
 	# for splash visuals & camera colour
 	area.connect("body_entered", _on_body_entered)
 	area.connect("body_exited", _on_body_exited)
-	
+
 	area.connect("area_entered", _on_area_entered)
 	area.connect("area_exited", _on_area_exited)
-	
+
 	# for actually sending the water signal
 	deep_area.connect("body_entered", _on_deep_body_entered)
 	deep_area.connect("body_exited", _on_deep_body_exited)
-	
+
 	damage_timer.connect("timeout", _on_damage_timer_timeout)
 
 func _on_deep_body_entered(body : PhysicsBody3D) -> void:
@@ -116,7 +130,7 @@ func splash(pos : Vector3) -> void:
 	add_child(audio)
 	audio.global_position = pos
 	audio.connect("finished", audio.queue_free)
-	
+
 	var particles : GPUParticles3D = splash_particles.instantiate()
 	add_child(particles)
 	particles.global_position = pos

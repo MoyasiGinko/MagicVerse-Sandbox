@@ -72,9 +72,20 @@ func _set_tool_audio_playing(mode : bool) -> void:
 var beam_active_time : int = 0
 func _physics_process(delta : float) -> void:
 	var adapter := _get_node_adapter()
-	if multiplayer.is_server() or (adapter != null and _is_local_authority()):
+	var is_local_owner := _is_local_authority()
+	var can_process := multiplayer.is_server() or (adapter != null and is_local_owner)
+	# Node backend: allow local victim processing even if tool is remote-owned
+	if adapter != null and !can_process:
+		for body: Node3D in beam_area.get_overlapping_bodies():
+			if body is RigidPlayer and (body as RigidPlayer).is_local_player:
+				can_process = true
+				break
+	if can_process:
 		# timer for lighting player/items on fire with sustained fire
 		if beam_active:
+			# keep beam visuals/collider active while firing
+			beam_mesh.visible = true
+			beam_area_collider.disabled = false
 			beam_active_time += 1
 		else:
 			beam_active_time = 0
@@ -87,9 +98,14 @@ func _physics_process(delta : float) -> void:
 				if !_do_we_own_player(body_player) && damage_cooldown < 1:
 					var executor_id : int = _get_tool_owner_peer_id()
 					if adapter != null:
-						adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), 1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true])
-						if beam_active_time > 35:
-							adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])
+						if body_player.is_local_player:
+							body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
+							if beam_active_time > 35:
+								body_player.light_fire(executor_id, 0)
+						elif is_local_owner:
+							adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), 1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true])
+							if beam_active_time > 35:
+								adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])
 					else:
 						body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
 						if beam_active_time > 35:
@@ -157,18 +173,27 @@ func _process(delta : float) -> void:
 				var mousepos := get_viewport().get_mouse_position()
 				var origin := camera.project_ray_origin(mousepos)
 				end = origin + camera.project_ray_normal(mousepos) * 250
-				start = visual_mesh_instance.get_node("beam_start_point").global_position
+				var start_node: Node3D = null
 				if visual_mesh_instance != null:
-					# for THIS client
-					update_beam(start, end)
-					# sync on first frame with other clients to avoid
-					# showing old position
-					# (other clients only sync beam at physics fps)
-					if Input.is_action_just_pressed("click"):
-						if adapter != null:
-							adapter.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
-						else:
-							update_beam.rpc(start, end)
+					start_node = visual_mesh_instance.get_node_or_null("beam_start_point")
+				if start_node != null:
+					start = start_node.global_position
+				else:
+					var spawn_node: Node3D = tool_player_owner.get_node_or_null("projectile_spawn_point")
+					if spawn_node != null:
+						start = spawn_node.global_position
+					else:
+						start = tool_player_owner.global_position + Vector3(0, 1.8, 0)
+				# for THIS client
+				update_beam(start, end)
+				# sync on first frame with other clients to avoid
+				# showing old position
+				# (other clients only sync beam at physics fps)
+				if Input.is_action_just_pressed("click"):
+					if adapter != null:
+						adapter.send_rpc_call("remote_pulse_beam", [_get_tool_owner_peer_id(), name, ui_tool_name, start, end])
+					else:
+						update_beam.rpc(start, end)
 			else:
 				tool_player_owner.locked = false
 				if beam_active:
