@@ -232,6 +232,7 @@ func extinguish_fire() -> void:
 # Visual-only fire effect (no damage)
 @rpc("any_peer", "call_local", "reliable")
 func show_fire_visual(duration : float = 0.6) -> void:
+	print("[RigidPlayer] 🔥 show_fire_visual on ", name, " duration=", duration, " is_local=", is_local_player)
 	fire.light()
 	await get_tree().create_timer(duration).timeout
 	fire.extinguish()

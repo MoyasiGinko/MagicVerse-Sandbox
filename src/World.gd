@@ -162,9 +162,12 @@ func remote_light_fire(peer_id : int, from_who_id : int, initial_damage : int) -
 
 func remote_fire_visual(peer_id : Variant, duration : float = 0.6) -> void:
 	var peer_id_int := _to_int(peer_id)
+	print("[World] 🔥 remote_fire_visual for peer=", peer_id_int, " duration=", duration)
 	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
 	if player == null:
+		print("[World] ⚠️ Player not found for peer ", peer_id_int)
 		return
+	print("[World] ✅ Showing fire visual on peer ", peer_id_int)
 	player.show_fire_visual(duration)
 
 func remote_tool_reset(peer_id : int) -> void:

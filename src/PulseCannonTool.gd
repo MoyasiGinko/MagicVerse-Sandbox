@@ -99,14 +99,21 @@ func _physics_process(delta : float) -> void:
 					var executor_id : int = _get_tool_owner_peer_id()
 					if adapter != null:
 						if body_player.is_local_player:
+							print("[PulseCannon] 🔥 Hit local victim ", body_player.name, " attacker=", executor_id, " beam_time=", beam_active_time)
 							body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
+							print("[PulseCannon] 📤 Sending remote_fire_visual for victim ", body_player.name)
 							adapter.send_rpc_call("remote_fire_visual", [int(body_player.name), 0.6])
 							if beam_active_time > 35:
+								print("[PulseCannon] 📤 Sending remote_light_fire for victim ", body_player.name)
 								body_player.light_fire(executor_id, 0)
 								adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])
 						elif is_local_owner:
+							print("[PulseCannon] 📤 Sending remote_apply_damage to remote victim ", body_player.name, " from attacker=", executor_id)
 							adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), 1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true])
+							print("[PulseCannon] 📤 Sending remote_fire_visual for attacker feedback on victim ", body_player.name)
+							adapter.send_rpc_call("remote_fire_visual", [int(body_player.name), 0.6])
 							if beam_active_time > 35:
+								print("[PulseCannon] 📤 Sending remote_light_fire to remote victim ", body_player.name)
 								adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])
 					else:
 						body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)

@@ -550,18 +550,24 @@ export function setupWebSocket(server: http.Server) {
             args,
           };
 
-          if (method === "remote_tool_active") {
+          if (
+            method === "remote_tool_active" ||
+            method === "remote_fire_visual"
+          ) {
             logInfo(
-              `[WS] 🔧 rpc_call remote_tool_active from peer ${session.peerId} to ${targetPeer === 0 ? "ALL" : targetPeer}, args: ${JSON.stringify(args)}`,
+              `[WS] 🔧 rpc_call ${method} from peer ${session.peerId} to ${targetPeer === 0 ? "ALL" : targetPeer}, args: ${JSON.stringify(args)}`,
             );
           }
 
           if (targetPeer === 0) {
             // Broadcast to all peers in room
             const recipientCount = room.clients.size - 1; // exclude sender
-            if (method === "remote_tool_active") {
+            if (
+              method === "remote_tool_active" ||
+              method === "remote_fire_visual"
+            ) {
               logInfo(
-                `[WS] 📢 Broadcasting remote_tool_active to ${recipientCount} peers (excluding ${session.peerId})`,
+                `[WS] 📢 Broadcasting ${method} to ${recipientCount} peers (excluding ${session.peerId})`,
               );
             }
             broadcast(room, "rpc_call", rpcData, session.peerId);
