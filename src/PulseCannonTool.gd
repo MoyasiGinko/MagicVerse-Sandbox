@@ -112,6 +112,8 @@ func _physics_process(delta : float) -> void:
 							adapter.send_rpc_call("remote_apply_damage", [int(body_player.name), 1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true])
 							print("[PulseCannon] 📤 Sending remote_fire_visual for attacker feedback on victim ", body_player.name)
 							adapter.send_rpc_call("remote_fire_visual", [int(body_player.name), 0.6])
+							# Show immediate local visual feedback for attacker
+							body_player.show_fire_visual(0.6)
 							if beam_active_time > 35:
 								print("[PulseCannon] 📤 Sending remote_light_fire to remote victim ", body_player.name)
 								adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])

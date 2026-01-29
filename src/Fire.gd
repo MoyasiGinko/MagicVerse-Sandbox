@@ -26,9 +26,12 @@ func set_particle_scale(size : Vector2 = Vector2(1, 1)) -> void:
 	particles.draw_pass_1 = new
 
 func light() -> void:
+	particles.emitting = true
 	particles.restart()
-	audio.play(randi_range(0, 4))
+	if audio != null:
+		audio.play(randi_range(0, 4))
 
 func extinguish() -> void:
 	particles.emitting = false
-	audio.stop()
+	if audio != null:
+		audio.stop()

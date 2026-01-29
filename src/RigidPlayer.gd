@@ -233,8 +233,19 @@ func extinguish_fire() -> void:
 @rpc("any_peer", "call_local", "reliable")
 func show_fire_visual(duration : float = 0.6) -> void:
 	print("[RigidPlayer] 🔥 show_fire_visual on ", name, " duration=", duration, " is_local=", is_local_player)
+	# Ensure particles are emitting
+	if fire.particles != null:
+		fire.particles.emitting = true
 	fire.light()
-	await get_tree().create_timer(duration).timeout
+	# Cancel any existing extinguish timer
+	if has_meta("fire_visual_timer"):
+		var old_timer: SceneTreeTimer = get_meta("fire_visual_timer")
+		if old_timer != null and is_instance_valid(old_timer):
+			old_timer.timeout.disconnect(fire.extinguish)
+	# Create new timer
+	var timer: SceneTreeTimer = get_tree().create_timer(duration)
+	set_meta("fire_visual_timer", timer)
+	await timer.timeout
 	fire.extinguish()
 
 func _set_can_enter_seat(mode : bool) -> void:
@@ -242,6 +253,22 @@ func _set_can_enter_seat(mode : bool) -> void:
 
 func change_appearance() -> void:
 	update_appearance.rpc(Global.shirt, Global.shirt_texture, Global.hair, Global.shirt_colour, Global.pants_colour, Global.hair_colour, Global.skin_colour)
+
+func sync_active_tool_to_peers() -> void:
+	"""Sync the currently active tool to all peers (for Node backend)"""
+	var adapter := _get_node_adapter()
+	if adapter == null:
+		return  # Only for Node backend
+
+	var inv := get_tool_inventory()
+	if inv == null:
+		return
+
+	var active_tool := inv.get_active_tool()
+	if active_tool != null:
+		var peer_id: int = int(name)
+		print("[RigidPlayer] 🔄 Syncing active tool '", active_tool.ui_tool_name, "' to all peers")
+		adapter.send_rpc_call("remote_tool_active", [peer_id, active_tool.name, active_tool.ui_tool_name, true])
 
 @rpc("call_local")
 func update_appearance(shirt : int, shirt_texture_base64 : String, hair : int, shirt_colour : Color, pants_colour : Color, hair_colour : Color, skin_colour : Color) -> void:
@@ -275,7 +302,7 @@ func update_appearance(shirt : int, shirt_texture_base64 : String, hair : int, s
 	if shirt_texture_base64 != null && shirt_texture_base64 != "":
 		# set shirt to base64 image
 		var image : Image = Image.new()
-		image.load_jpg_from_buffer(Marshalls.base64_to_raw(shirt_texture_base64))
+		image.load_jpg_from_buffer(Marshalls.base64_to_raw(shirt_texture_base64 as String))
 		if image != null:
 			if image is Image:
 				shirt_material.albedo_texture = ImageTexture.new().create_from_image(image)
@@ -871,6 +898,7 @@ func _ready() -> void:
 		multiplayer.connected_to_server.connect(update_info)
 		# when someone connects, broadcast our player info to only them
 		multiplayer.peer_connected.connect(update_info.bind(true))
+		multiplayer.peer_connected.connect(sync_active_tool_to_peers)
 		# update peers with name and team
 		update_info(get_multiplayer_authority())
 		# update peers with appearance
