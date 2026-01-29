@@ -160,6 +160,13 @@ func remote_light_fire(peer_id : int, from_who_id : int, initial_damage : int) -
 		return
 	player.light_fire(from_who_id, initial_damage)
 
+func remote_fire_visual(peer_id : Variant, duration : float = 0.6) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		return
+	player.show_fire_visual(duration)
+
 func remote_tool_reset(peer_id : int) -> void:
 	print("[World] 🧰 remote_tool_reset peer=", peer_id)
 	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
@@ -169,6 +176,23 @@ func remote_tool_reset(peer_id : int) -> void:
 	if inv == null:
 		return
 	inv.reset()
+
+func remote_tool_active(peer_id : Variant, tool_node_name : String, tool_label : String, mode : bool) -> void:
+	var peer_id_int := _to_int(peer_id)
+	print("[World] 🔧 remote_tool_active peer=", peer_id_int, " tool=", tool_node_name, " mode=", mode)
+
+	# Don't process our own tool changes (already handled locally)
+	var local_peer_id := multiplayer.get_unique_id()
+	if peer_id_int == local_peer_id:
+		print("[World] ⏩ Skipping remote_tool_active for local player")
+		return
+
+	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
+	if tool == null:
+		print("[World] ⚠️ Tool not found for peer ", peer_id_int)
+		return
+	print("[World] ✅ Showing tool visual for peer ", peer_id_int)
+	tool.show_tool_visual(mode)
 
 func remote_set_health(peer_id : Variant, new_health : int, cause_of_death : int = -1, executor_id : int = -1) -> void:
 	var peer_id_int := _to_int(peer_id)

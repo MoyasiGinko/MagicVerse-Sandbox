@@ -236,6 +236,11 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 				ui_partner.button_pressed = true
 		# Player tool specifics
 		if type == ToolType.PLAYER:
+			var adapter := _get_node_adapter()
+			if adapter != null:
+				var peer := _get_tool_owner_peer_id()
+				print("[Tool] 🔧 Sending remote_tool_active EQUIP peer=", peer, " tool=", name, " label=", ui_tool_name)
+				adapter.send_rpc_call("remote_tool_active", [peer, name, ui_tool_name, true])
 			if camera is Camera:
 				if lock_camera_to_aim:
 					camera.set_mode_locked(true, Camera.CameraMode.AIM)
@@ -250,6 +255,11 @@ func set_tool_active(mode : bool, from_click : bool = false, free_camera_on_inac
 				_broadcast_tool_visual(true)
 	else:
 		if type == ToolType.PLAYER:
+			var adapter2 := _get_node_adapter()
+			if adapter2 != null:
+				var peer2 := _get_tool_owner_peer_id()
+				print("[Tool] 🔧 Sending remote_tool_active UNEQUIP peer=", peer2, " tool=", name, " label=", ui_tool_name)
+				adapter2.send_rpc_call("remote_tool_active", [peer2, name, ui_tool_name, false])
 			if lock_camera_to_aim && free_camera_on_inactive && camera is Camera:
 				# if the player specifically requested aim mode with right click
 				# don't switch to free when the tool is deselected

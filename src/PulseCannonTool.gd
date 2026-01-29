@@ -100,6 +100,7 @@ func _physics_process(delta : float) -> void:
 					if adapter != null:
 						if body_player.is_local_player:
 							body_player.reduce_health(1, RigidPlayer.CauseOfDeath.FIRE, executor_id, true)
+							adapter.send_rpc_call("remote_fire_visual", [int(body_player.name), 0.6])
 							if beam_active_time > 35:
 								body_player.light_fire(executor_id, 0)
 								adapter.send_rpc_call("remote_light_fire", [int(body_player.name), executor_id, 0])

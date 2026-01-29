@@ -229,6 +229,13 @@ func extinguish_fire() -> void:
 				$FireTimer.queue_free()
 	fire.extinguish()
 
+# Visual-only fire effect (no damage)
+@rpc("any_peer", "call_local", "reliable")
+func show_fire_visual(duration : float = 0.6) -> void:
+	fire.light()
+	await get_tree().create_timer(duration).timeout
+	fire.extinguish()
+
 func _set_can_enter_seat(mode : bool) -> void:
 	can_enter_seat = mode
 

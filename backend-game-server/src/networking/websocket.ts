@@ -46,12 +46,12 @@ function broadcast(
   room: GameRoom,
   type: string,
   data: unknown,
-  excludePeerId?: number
+  excludePeerId?: number,
 ) {
   for (const client of room.clients.values()) {
     if (excludePeerId && client.peerId === excludePeerId) continue;
     const session = Array.from(clientSessions.values()).find(
-      (s) => s.roomId === room.id && s.peerId === client.peerId
+      (s) => s.roomId === room.id && s.peerId === client.peerId,
     );
     if (session) {
       send(session.ws, type, data);
@@ -104,7 +104,7 @@ function cleanupClient(ws: WebSocket) {
       if (userId) {
         roomRepo.removePlayerSession(userId, roomId);
         console.log(
-          `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`
+          `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`,
         );
       }
 
@@ -114,7 +114,7 @@ function cleanupClient(ws: WebSocket) {
         // Promote first remaining member to host
         remainingMembers[0].isHost = true;
         console.log(
-          `[WebSocket] 👑 Player ${remainingMembers[0].name} promoted to host (previous host left)`
+          `[WebSocket] 👑 Player ${remainingMembers[0].name} promoted to host (previous host left)`,
         );
         // Notify all players about the new host
         broadcast(room, "host_changed", {
@@ -173,7 +173,7 @@ export function setupWebSocket(server: http.Server) {
               session.isAuthenticated = true;
               session.name = user.username;
               logInfo(
-                `authenticated user: userId=${user.userId} username=${user.username}`
+                `authenticated user: userId=${user.userId} username=${user.username}`,
               );
             } else {
               return send(ws, "error", { reason: "invalid_token" });
@@ -190,7 +190,7 @@ export function setupWebSocket(server: http.Server) {
             username: session.name,
           });
           logInfo(
-            `handshake: name=${session.name} auth=${session.isAuthenticated}`
+            `handshake: name=${session.name} auth=${session.isAuthenticated}`,
           );
 
           // Broadcast user_online to all clients if authenticated
@@ -232,14 +232,14 @@ export function setupWebSocket(server: http.Server) {
               roomId,
               session.version,
               session.name,
-              ip
+              ip,
             );
           }
 
           // Host already added to player_sessions in HTTP POST
           // Just update session and respond
           console.log(
-            `[WebSocket] 👑 Host ${session.userId} confirming room ${roomId}`
+            `[WebSocket] 👑 Host ${session.userId} confirming room ${roomId}`,
           );
 
           session.peerId = 1;
@@ -251,7 +251,7 @@ export function setupWebSocket(server: http.Server) {
             mapName: existingRoom.map_name,
           });
           logInfo(
-            `room created: roomId=${roomId} gamemode=${existingRoom.gamemode} host=${session.name}`
+            `room created: roomId=${roomId} gamemode=${existingRoom.gamemode} host=${session.name}`,
           );
           break;
         }
@@ -278,10 +278,10 @@ export function setupWebSocket(server: http.Server) {
           const playerName = (msg.data as any).name;
 
           console.log(
-            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`
+            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`,
           );
           console.log(
-            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`
+            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`,
           );
 
           // Check if room exists in memory; if not, try to load from database
@@ -291,7 +291,7 @@ export function setupWebSocket(server: http.Server) {
             const dbRoom = roomRepo.getRoomById(roomId);
             if (!dbRoom) {
               console.log(
-                `[WebSocket] ❌ join_room: Room ${roomId} not found in database`
+                `[WebSocket] ❌ join_room: Room ${roomId} not found in database`,
               );
               return send(ws, "error", { reason: "room_not_found" });
             }
@@ -300,17 +300,17 @@ export function setupWebSocket(server: http.Server) {
               roomId,
               version,
               dbRoom.host_username,
-              ip
+              ip,
             );
             console.log(
-              `[WebSocket] 📂 Loaded room ${roomId} from database into memory`
+              `[WebSocket] 📂 Loaded room ${roomId} from database into memory`,
             );
           }
 
           const result = roomManager.joinRoom(roomId, version, playerName, ip);
           if ("error" in result) {
             console.log(
-              `[WebSocket] ❌ join_room: RoomManager error - ${result.error}`
+              `[WebSocket] ❌ join_room: RoomManager error - ${result.error}`,
             );
             return send(ws, "error", { reason: result.error });
           }
@@ -323,11 +323,11 @@ export function setupWebSocket(server: http.Server) {
           // Add player to room session (enforces single-room, increments player count)
           const sessionAdded = roomRepo.addPlayerSession(
             session.userId!,
-            roomId
+            roomId,
           );
           if (!sessionAdded) {
             console.log(
-              `[WebSocket] ⚠️  Player ${session.userId} already in room ${roomId}, sending existing session info`
+              `[WebSocket] ⚠️  Player ${session.userId} already in room ${roomId}, sending existing session info`,
             );
             // Player already in room - just send them the room_joined confirmation again
             const members = roomManager.getRoomMembers(roomId);
@@ -346,7 +346,7 @@ export function setupWebSocket(server: http.Server) {
             });
           }
           console.log(
-            `[WebSocket] 🎮 Player ${session.userId} joined room ${roomId}`
+            `[WebSocket] 🎮 Player ${session.userId} joined room ${roomId}`,
           );
 
           // Check if room was empty and promote this player to host
@@ -356,7 +356,7 @@ export function setupWebSocket(server: http.Server) {
             const updatedMember = roomManager.getRoomMembers(roomId)[0];
             updatedMember.isHost = true;
             console.log(
-              `[WebSocket] 👑 Player ${session.userId} promoted to host (first member in empty room)`
+              `[WebSocket] 👑 Player ${session.userId} promoted to host (first member in empty room)`,
             );
           }
 
@@ -365,7 +365,7 @@ export function setupWebSocket(server: http.Server) {
           const members = roomManager.getRoomMembers(roomId);
           console.log(
             `[WebSocket] 👥 Room ${roomId} members:`,
-            members.map((m) => `peer=${m.peerId} name=${m.name}`)
+            members.map((m) => `peer=${m.peerId} name=${m.name}`),
           );
 
           // Get room info from database to include gamemode and map
@@ -385,16 +385,16 @@ export function setupWebSocket(server: http.Server) {
           });
 
           console.log(
-            `[WebSocket] 📢 Broadcasting peer_joined to room: peerId=${peerId} name=${session.name}`
+            `[WebSocket] 📢 Broadcasting peer_joined to room: peerId=${peerId} name=${session.name}`,
           );
           broadcast(
             updatedRoom,
             "peer_joined",
             { peerId, name: session.name },
-            peerId
+            peerId,
           );
           logInfo(
-            `peer joined: roomId=${roomId} peerId=${peerId} name=${session.name}`
+            `peer joined: roomId=${roomId} peerId=${peerId} name=${session.name}`,
           );
           break;
         }
@@ -417,8 +417,8 @@ export function setupWebSocket(server: http.Server) {
           logInfo(
             `chat: roomId=${room.id} peerId=${session.peerId} msg=${text.slice(
               0,
-              50
-            )}`
+              50,
+            )}`,
           );
           break;
         }
@@ -454,7 +454,7 @@ export function setupWebSocket(server: http.Server) {
               from: session.peerId,
               payload: (msg.data as any)?.payload ?? {},
             },
-            session.peerId
+            session.peerId,
           );
           break;
         }
@@ -480,7 +480,7 @@ export function setupWebSocket(server: http.Server) {
               state: stateData.state ?? 0,
               anim: stateData.anim || {},
             },
-            session.peerId
+            session.peerId,
           );
           break;
         }
@@ -499,7 +499,7 @@ export function setupWebSocket(server: http.Server) {
             return send(ws, "error", { reason: "invalid_target" });
           }
           const targetSession = Array.from(clientSessions.values()).find(
-            (s) => s.roomId === room.id && s.peerId === targetPeerId
+            (s) => s.roomId === room.id && s.peerId === targetPeerId,
           );
           if (targetSession) {
             send(targetSession.ws, "kicked", { reason: "host_kick" });
@@ -550,13 +550,25 @@ export function setupWebSocket(server: http.Server) {
             args,
           };
 
+          if (method === "remote_tool_active") {
+            logInfo(
+              `[WS] 🔧 rpc_call remote_tool_active from peer ${session.peerId} to ${targetPeer === 0 ? "ALL" : targetPeer}, args: ${JSON.stringify(args)}`,
+            );
+          }
+
           if (targetPeer === 0) {
             // Broadcast to all peers in room
+            const recipientCount = room.clients.size - 1; // exclude sender
+            if (method === "remote_tool_active") {
+              logInfo(
+                `[WS] 📢 Broadcasting remote_tool_active to ${recipientCount} peers (excluding ${session.peerId})`,
+              );
+            }
             broadcast(room, "rpc_call", rpcData, session.peerId);
           } else {
             // Send to specific peer
             const targetSession = Array.from(clientSessions.values()).find(
-              (s) => s.roomId === room.id && s.peerId === targetPeer
+              (s) => s.roomId === room.id && s.peerId === targetPeer,
             );
             if (targetSession) {
               send(targetSession.ws, "rpc_call", rpcData);
