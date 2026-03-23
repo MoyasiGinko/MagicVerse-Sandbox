@@ -185,16 +185,32 @@ func remote_tool_active(peer_id : Variant, tool_node_name : String, tool_label :
 	print("[World] 🔧 remote_tool_active peer=", peer_id_int, " tool=", tool_node_name, " mode=", mode)
 
 	# Don't process our own tool changes (already handled locally)
-	var local_peer_id := multiplayer.get_unique_id()
-	if peer_id_int == local_peer_id:
+	var player_for_tool: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player_for_tool != null and player_for_tool.is_local_player:
 		print("[World] ⏩ Skipping remote_tool_active for local player")
 		return
 
 	var tool := _find_tool_for_player(peer_id_int, tool_node_name, tool_label)
 	if tool == null:
-		print("[World] ⚠️ Tool not found for peer ", peer_id_int)
+		print("[World] ⚠️ Tool not found for peer ", peer_id_int, " - retrying")
+		_retry_tool_active(peer_id_int, tool_node_name, tool_label, mode, 4)
 		return
 	print("[World] ✅ Showing tool visual for peer ", peer_id_int)
+	tool.show_tool_visual(mode)
+
+func _retry_tool_active(peer_id : int, tool_node_name : String, tool_label : String, mode : bool, attempts : int) -> void:
+	if attempts <= 0:
+		return
+	await get_tree().create_timer(0.1).timeout
+	# Don't process our own tool changes (already handled locally)
+	var player_for_tool: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player_for_tool != null and player_for_tool.is_local_player:
+		return
+	var tool := _find_tool_for_player(peer_id, tool_node_name, tool_label)
+	if tool == null:
+		_retry_tool_active(peer_id, tool_node_name, tool_label, mode, attempts - 1)
+		return
+	print("[World] ✅ Showing tool visual for peer ", peer_id)
 	tool.show_tool_visual(mode)
 
 func remote_set_health(peer_id : Variant, new_health : int, cause_of_death : int = -1, executor_id : int = -1) -> void:
@@ -206,6 +222,35 @@ func remote_set_health(peer_id : Variant, new_health : int, cause_of_death : int
 		player.set_health(new_health, cause_of_death, executor_id)
 	else:
 		player._receive_server_health(new_health, executor_id)
+
+func remote_set_kills(peer_id : Variant, new_kills : int) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		_retry_remote_score_sync(peer_id_int, true, new_kills, 4)
+		return
+	player._receive_server_kills(new_kills)
+
+func remote_set_deaths(peer_id : Variant, new_deaths : int) -> void:
+	var peer_id_int := _to_int(peer_id)
+	var player: RigidPlayer = get_node_or_null(str(peer_id_int)) as RigidPlayer
+	if player == null:
+		_retry_remote_score_sync(peer_id_int, false, new_deaths, 4)
+		return
+	player._receive_server_deaths(new_deaths)
+
+func _retry_remote_score_sync(peer_id : int, is_kill : bool, value : int, attempts : int) -> void:
+	if attempts <= 0:
+		return
+	await get_tree().create_timer(0.1).timeout
+	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
+	if player == null:
+		_retry_remote_score_sync(peer_id, is_kill, value, attempts - 1)
+		return
+	if is_kill:
+		player._receive_server_kills(value)
+	else:
+		player._receive_server_deaths(value)
 
 func remote_apply_damage(peer_id : Variant, amount : int, cause_of_death : int = -1, executor_id : int = -1, override_invincibility : bool = false) -> void:
 	var peer_id_int := _to_int(peer_id)

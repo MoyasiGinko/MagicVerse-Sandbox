@@ -792,6 +792,16 @@ func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
 	else:
 		print("[Main] ⚠️ PlayerList not found")
 
+	# Fallback: replay local host's currently equipped tool state to the joining peer.
+	# This prevents late-join desync if peer_connected signal timing was missed.
+	if node_peer != null:
+		var world := Global.get_world()
+		if world != null:
+			var local_peer_id: int = node_peer.get_unique_peer_id()
+			var local_player: RigidPlayer = world.get_node_or_null(str(local_peer_id)) as RigidPlayer
+			if local_player != null and local_player.is_local_player:
+				local_player.sync_active_tool_to_peers(peer_id)
+
 func _on_connection_failed(reason: String) -> void:
 	push_error("Node backend connection failed: " + reason)
 	UIHandler.show_alert("Connection failed: " + reason, 8, false, UIHandler.alert_colour_error)

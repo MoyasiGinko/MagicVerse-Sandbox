@@ -254,21 +254,42 @@ func _set_can_enter_seat(mode : bool) -> void:
 func change_appearance() -> void:
 	update_appearance.rpc(Global.shirt, Global.shirt_texture, Global.hair, Global.shirt_colour, Global.pants_colour, Global.hair_colour, Global.skin_colour)
 
-func sync_active_tool_to_peers() -> void:
-	"""Sync the currently active tool to all peers (for Node backend)"""
+func sync_active_tool_to_peers(target_peer_id : int = 0) -> void:
+	"""Sync the currently active tool to peers (Node backend)."""
+	if !is_local_player:
+		return
 	var adapter := _get_node_adapter()
 	if adapter == null:
 		return  # Only for Node backend
+
+	# Delay a tick to ensure remote player/tool inventory is created on the joining peer
+	await get_tree().create_timer(0.2).timeout
 
 	var inv := get_tool_inventory()
 	if inv == null:
 		return
 
+	var owner_peer_id: int = int(name)
+
+	# Ensure special tools (e.g., Pulse Cannon) exist on the joining peer
+	var pulse_tool: Tool = inv.has_tool_by_name("PulseCannonTool")
+	if pulse_tool != null:
+		var ammo_to_send: int = -1
+		var raw_ammo: Variant = pulse_tool.get("ammo")
+		if raw_ammo != null:
+			if raw_ammo is int:
+				ammo_to_send = raw_ammo as int
+			elif raw_ammo is float:
+				ammo_to_send = int(raw_ammo as float)
+			elif raw_ammo is bool:
+				ammo_to_send = int(raw_ammo as bool)
+		print("[RigidPlayer] 🧰 Syncing Pulse Cannon inventory to peer=", target_peer_id, " ammo=", ammo_to_send)
+		adapter.send_rpc_call("remote_add_tool", [owner_peer_id, int(ToolInventory.ToolIdx.PulseCannon), ammo_to_send], target_peer_id)
+
 	var active_tool := inv.get_active_tool()
 	if active_tool != null:
-		var peer_id: int = int(name)
-		print("[RigidPlayer] 🔄 Syncing active tool '", active_tool.ui_tool_name, "' to all peers")
-		adapter.send_rpc_call("remote_tool_active", [peer_id, active_tool.name, active_tool.ui_tool_name, true])
+		print("[RigidPlayer] 🔄 Syncing active tool '", active_tool.ui_tool_name, "' to peer=", target_peer_id)
+		adapter.send_rpc_call("remote_tool_active", [owner_peer_id, active_tool.name, active_tool.ui_tool_name, true], target_peer_id)
 
 @rpc("call_local")
 func update_appearance(shirt : int, shirt_texture_base64 : String, hair : int, shirt_colour : Color, pants_colour : Color, hair_colour : Color, skin_colour : Color) -> void:
@@ -794,7 +815,8 @@ func update_info(_who : int, to_connected_peer : bool = false) -> void:
 
 	change_appearance()
 	# server handles kills and deaths
-	if multiplayer.is_server():
+	var adapter := _get_node_adapter()
+	if multiplayer.is_server() or (adapter != null and is_local_player):
 		update_kills(kills)
 		update_deaths(deaths)
 
@@ -897,8 +919,15 @@ func _ready() -> void:
 		connect("body_entered", _on_body_entered)
 		multiplayer.connected_to_server.connect(update_info)
 		# when someone connects, broadcast our player info to only them
-		multiplayer.peer_connected.connect(update_info.bind(true))
-		multiplayer.peer_connected.connect(sync_active_tool_to_peers)
+		if not multiplayer.peer_connected.is_connected(update_info.bind(true)):
+			multiplayer.peer_connected.connect(update_info.bind(true))
+		if not multiplayer.peer_connected.is_connected(sync_active_tool_to_peers):
+			multiplayer.peer_connected.connect(sync_active_tool_to_peers)
+		# Node backend does not always forward through Godot's multiplayer peer signal,
+		# so mirror the sync hookup on the adapter peer signal for late joiners.
+		if adapter != null:
+			if not adapter.peer_connected.is_connected(sync_active_tool_to_peers):
+				adapter.peer_connected.connect(sync_active_tool_to_peers)
 		# update peers with name and team
 		update_info(get_multiplayer_authority())
 		# update peers with appearance
@@ -2084,6 +2113,7 @@ func update_kills(new_kills : int) -> void:
 	kills = new_kills
 	if adapter != null:
 		_receive_server_kills(new_kills)
+		adapter.send_rpc_call("remote_set_kills", [int(name), new_kills])
 	else:
 		_receive_server_kills.rpc(new_kills)
 	Global.update_player_list_information()
@@ -2096,6 +2126,7 @@ func update_deaths(new_deaths : int) -> void:
 	deaths = new_deaths
 	if adapter != null:
 		_receive_server_deaths(new_deaths)
+		adapter.send_rpc_call("remote_set_deaths", [int(name), new_deaths])
 	else:
 		_receive_server_deaths.rpc(new_deaths)
 	Global.update_player_list_information()
@@ -2116,21 +2147,27 @@ func update_checkpoint(new_checkpoint : int) -> void:
 # client side
 @rpc("any_peer", "call_local", "reliable")
 func _receive_server_kills(new : int) -> void:
-	if multiplayer.is_server(): return
+	var adapter := _get_node_adapter()
+	if adapter == null and multiplayer.is_server():
+		return
 	kills = new
 	Global.update_player_list_information()
 
 # client side
 @rpc("any_peer", "call_local", "reliable")
 func _receive_server_deaths(new : int) -> void:
-	if multiplayer.is_server(): return
+	var adapter := _get_node_adapter()
+	if adapter == null and multiplayer.is_server():
+		return
 	deaths = new
 	Global.update_player_list_information()
 
 # client side
 @rpc("any_peer", "call_local", "reliable")
 func _receive_server_capture_time(new : int) -> void:
-	if multiplayer.is_server(): return
+	var adapter := _get_node_adapter()
+	if adapter == null and multiplayer.is_server():
+		return
 	capture_time = new
 	Global.update_player_list_information()
 
