@@ -22,6 +22,11 @@ signal died()
 signal teleported()
 signal kills_increased()
 
+func _get_current_map_or_null() -> Map:
+	if world == null:
+		return null
+	return world.get_current_map()
+
 ## Helper function to check if this is the server (uses adapter if available)
 func _is_server() -> bool:
 	# First try to get adapter wrapper from Main
@@ -758,8 +763,8 @@ func update_team(new : String) -> void:
 @rpc("call_local")
 func update_name(new : String) -> void:
 	print("[RigidPlayer] 👤 Updating player name to: ", new, " for peer ", name)
-	name_label.text = new
-	display_name = new
+	_apply_overhead_display_name(new)
+	assigned_player_name = display_name
 
 	# Add the player to the player list.
 	var player_list : Control = get_tree().current_scene.get_node("GameCanvas/PlayerList")
@@ -768,6 +773,13 @@ func update_name(new : String) -> void:
 		print("[RigidPlayer] ✅ Added player to player list")
 	else:
 		print("[RigidPlayer] ⚠️ PlayerList not found!")
+
+func _apply_overhead_display_name(new_name : String) -> void:
+	var resolved_name := new_name.strip_edges()
+	if resolved_name == "":
+		resolved_name = str("Player ", name)
+	name_label.text = resolved_name
+	display_name = resolved_name
 
 @rpc("any_peer", "call_local", "reliable")
 func set_name_visible(mode : bool) -> void:
@@ -848,7 +860,11 @@ func _ready() -> void:
 			# update spawns when world is loaded as server
 			Global.get_world().connect("tbw_loaded", _on_tbw_loaded)
 			# keep clients in stasis until they are connected
-			global_position = Vector3(0, world.get_current_map().death_limit_high - 5, 0)
+			var current_map := _get_current_map_or_null()
+			var stasis_height := 395.0
+			if current_map != null:
+				stasis_height = float(current_map.death_limit_high - 5)
+			global_position = Vector3(0, stasis_height, 0)
 			freeze = true
 
 		# Determine if this is the local player
@@ -899,6 +915,9 @@ func _ready() -> void:
 				freeze = true
 				gravity_scale = 0
 				linear_velocity = Vector3.ZERO
+			# Apply the synced backend name immediately so overhead label never shows placeholder text.
+			_apply_overhead_display_name(assigned_player_name)
+			name_label.visible = true
 			# Still build tool inventory locally so remote tool visuals can sync
 			get_tool_inventory().reset()
 			print("[RigidPlayer] 🚫 Not local player, skipping initialization")
@@ -937,6 +956,9 @@ func _ready() -> void:
 		go_to_spawn()
 		if adapter != null:
 			freeze = false
+		# Keep local metadata in sync (name label itself remains hidden for self).
+		var local_name := Global.player_display_name if Global.player_display_name != "" else Global.display_name
+		_apply_overhead_display_name(local_name)
 		# hide your own name label
 		name_label.visible = false
 		# in case we were not present on client when server sent
@@ -1437,8 +1459,10 @@ func _integrate_forces(state : PhysicsDirectBodyState3D) -> void:
 	# handle out of map ( runs outside auth check )
 	if multiplayer.is_server():
 		if !invulnerable:
-			if global_position.y < Global.get_world().get_current_map().death_limit_low || global_position.y > Global.get_world().get_current_map().death_limit_high:
-				set_health(0, CauseOfDeath.OUT_OF_MAP)
+			var current_map := _get_current_map_or_null()
+			if current_map != null:
+				if global_position.y < current_map.death_limit_low || global_position.y > current_map.death_limit_high:
+					set_health(0, CauseOfDeath.OUT_OF_MAP)
 
 @rpc("any_peer", "call_local", "reliable")
 func set_standing_on_object_rpc(what_path : String) -> void:
