@@ -9,6 +9,10 @@ import roomRoutes from "./api/roomRoutes";
 import statsRoutes from "./api/statsRoutes";
 import userRoutes from "./api/userRoutes";
 import worldRoutes from "./api/worldRoutes";
+import {
+  heartbeatGameServer,
+  registerGameServer,
+} from "./integration/djangoRegistry";
 
 const app = express();
 const server = http.createServer(app);
@@ -44,6 +48,25 @@ setInterval(() => {
   }
 }, 30 * 1000);
 
+function collectRegistryStats(): {
+  currentPlayers: number;
+  maxPlayers: number;
+} {
+  const activeRooms = roomRepo.getAllActiveRooms();
+  const currentPlayers = activeRooms.reduce(
+    (sum, room) => sum + room.current_players,
+    0,
+  );
+  const maxPlayers = activeRooms.reduce(
+    (sum, room) => sum + room.max_players,
+    0,
+  );
+  return {
+    currentPlayers,
+    maxPlayers: maxPlayers > 0 ? maxPlayers : 64,
+  };
+}
+
 server.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`Server is running on port ${config.port}`);
@@ -57,4 +80,24 @@ server.listen(config.port, () => {
   console.log(`  - GET  /api/users/online (Online Users)`);
   console.log(`  - GET  /api/users/:id/stats`);
   console.log(`  - GET  /api/leaderboard`);
+
+  const initial = collectRegistryStats();
+  registerGameServer(initial.currentPlayers, initial.maxPlayers)
+    .then(() => {
+      console.log(
+        `📡 Registered with Django registry at ${config.djangoRegistryBaseUrl}`,
+      );
+    })
+    .catch((error: Error) => {
+      console.warn(`⚠️ Registry registration failed: ${error.message}`);
+    });
 });
+
+setInterval(() => {
+  const stats = collectRegistryStats();
+  heartbeatGameServer(stats.currentPlayers, stats.maxPlayers).catch(
+    (error: Error) => {
+      console.warn(`⚠️ Registry heartbeat failed: ${error.message}`);
+    },
+  );
+}, 15 * 1000);

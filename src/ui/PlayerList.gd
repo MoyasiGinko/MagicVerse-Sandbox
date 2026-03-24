@@ -44,6 +44,7 @@ func refresh_from_adapter() -> void:
 		return
 	if !_adapter_hooked:
 		adapter.peer_joined_with_name.connect(_on_peer_joined_node)
+		adapter.peer_connected.connect(_on_peer_connected_node)
 		adapter.peer_disconnected.connect(_on_peer_left_node)
 		_adapter_hooked = true
 	_remove_duplicate_entries()
@@ -205,9 +206,20 @@ func _remove_player_entry_by_id(peer_id: int) -> void:
 
 func _on_peer_joined_node(peer_id: int, peer_name: String) -> void:
 	add_player_from_server(peer_id, peer_name, 0)
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		_populate_from_adapter(adapter)
+
+func _on_peer_connected_node(_peer_id: int) -> void:
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		_populate_from_adapter(adapter)
 
 func _on_peer_left_node(peer_id: int) -> void:
 	_remove_player_entry_by_id(peer_id)
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		_populate_from_adapter(adapter)
 
 func _populate_from_adapter(adapter: MultiplayerNodeAdapter) -> void:
 	var peers := adapter.get_all_peers_with_names()

@@ -9,9 +9,10 @@ var loading_label: Label
 # Configuration
 const MINIMUM_SPLASH_TIME: float = 5.0  # Minimum time to show splash
 const BANNER_IMAGE_PATH: String = "res://magicverse-banner2.png"  # Path to your banner image
-const VERIFICATION_TIMEOUT: float = 5.0  # Maximum time to wait for verification
+const VERIFICATION_TIMEOUT: float = 8.0  # Maximum time to wait for verification
 
 var auth_manager: AuthenticationManager = null
+var ws_manager: GlobalWebSocketManager = null
 var splash_timer: float = 0.0
 var verification_complete: bool = false
 var verification_successful: bool = false
@@ -32,14 +33,19 @@ func _ready() -> void:
 	auth_manager = AuthenticationManager.new()
 	add_child(auth_manager)
 	auth_manager.verification_complete.connect(_on_verification_complete)
+	auth_manager.authentication_failed.connect(_on_authentication_failed)
+
+	ws_manager = get_node_or_null("/root/WSManager") as GlobalWebSocketManager
+	if ws_manager and not ws_manager.auth_handshake_accepted.is_connected(_on_ws_auth_handshake_accepted):
+		ws_manager.auth_handshake_accepted.connect(_on_ws_auth_handshake_accepted)
 
 	# Start splash timer
 	splash_timer = 0.0
 	status_label.text = "Initializing..."
 	progress_bar.value = 0
 
-	# Check if we have a saved token or need to verify
-	_start_verification()
+	# Defer startup by one frame so child nodes complete _ready initialization.
+	call_deferred("_start_verification")
 
 func _process(delta: float) -> void:
 	splash_timer += delta
@@ -78,6 +84,10 @@ func _start_verification() -> void:
 		# Set timeout for verification
 		await get_tree().create_timer(VERIFICATION_TIMEOUT).timeout
 		if not verification_complete:
+			if ws_manager and ws_manager.is_socket_authenticated:
+				print("Verification HTTP timeout, but WS handshake is authenticated. Proceeding.")
+				_on_verification_complete(true)
+				return
 			print("Verification timed out!")
 			status_label.text = "Verification timeout"
 			verification_complete = true
@@ -102,6 +112,22 @@ func _on_verification_complete(is_valid: bool) -> void:
 	else:
 		status_label.text = "Session expired, please login again"
 		loading_label.text = "✗ Session invalid"
+
+func _on_authentication_failed(reason: String) -> void:
+	# Verification uses the same HTTP pipeline; make failure deterministic instead of waiting for timeout.
+	if verification_complete:
+		return
+	print("Authentication error during verification: ", reason)
+	status_label.text = "Verification failed"
+	loading_label.text = "✗ " + reason
+	verification_complete = true
+	verification_successful = false
+
+func _on_ws_auth_handshake_accepted(_user_id: int) -> void:
+	if verification_complete:
+		return
+	print("WS auth handshake accepted, using as verification fallback")
+	_on_verification_complete(true)
 
 func _proceed_to_game() -> void:
 	print("_proceed_to_game called")

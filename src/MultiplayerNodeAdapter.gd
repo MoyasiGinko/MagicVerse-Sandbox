@@ -12,7 +12,7 @@ signal peer_disconnected(peer_id: int)  # For multiplayer system integration
 signal peer_joined_with_name(peer_id: int, peer_name: String)  # For player list updates
 
 var ws: WebSocketPeer = null
-var server_url: String = "ws://localhost:30820"
+var server_url: String = BackendConfig.get_node_ws_url()
 var _peer_id: int = 0
 var _room_id: String = ""
 var _connected_peers: PackedInt32Array = []
@@ -205,7 +205,8 @@ func _handle_state(data: Dictionary) -> void:
 func _handle_rpc(data: Dictionary) -> void:
 	var method_name: String = data.get("method", "")
 	var args: Array = data.get("args", [])
-	var from_peer: int = data.get("from", 0)
+	# Server currently sends fromPeer; keep fallback for older payloads that used from.
+	var from_peer: int = int(data.get("fromPeer", data.get("from", 0)) as float)
 	print("[NodeAdapter] 📥 rpc_call method=", method_name, " from=", from_peer, " args=", args)
 
 	# Route to existing Godot methods on Main or World
@@ -522,6 +523,9 @@ func _handle_peer_left(data: Dictionary) -> void:
 func _handle_player_state(data: Dictionary) -> void:
 	"""Handle incoming player state (position, rotation, velocity, animation state, animation blends)"""
 	var peer_id: int = data.get("peerId", 0) as int
+	# Never apply replicated state to the local authority player.
+	if peer_id == _peer_id:
+		return
 	var pos_data: Dictionary = data.get("position", {"x": 0, "y": 0, "z": 0}) as Dictionary
 	var rot_data: Dictionary = data.get("rotation", {"x": 0, "y": 0, "z": 0}) as Dictionary
 	var vel_data: Dictionary = data.get("velocity", {"x": 0, "y": 0, "z": 0}) as Dictionary
@@ -540,8 +544,22 @@ func _handle_player_state(data: Dictionary) -> void:
 	# Find RigidPlayer by peer_id (should be named with peer_id)
 	var player_node: Node = world.get_node_or_null(str(peer_id))
 	if not player_node:
-		print("[NodeAdapter] ⚠️ Player node not found for peer ", peer_id)
-		return
+		# Recover from missed/jittered join events by spawning remote player lazily.
+		var recovered_name := "Unknown"
+		for member_data: Variant in room_members:
+			if typeof(member_data) == TYPE_DICTIONARY and (member_data as Dictionary).get("peerId", -1) as int == peer_id:
+				recovered_name = (member_data as Dictionary).get("name", "Unknown") as String
+				break
+
+		var player_scene: PackedScene = preload("res://data/scene/character/RigidPlayer.tscn")
+		var recovered_player: RigidPlayer = player_scene.instantiate()
+		recovered_player.name = str(peer_id)
+		recovered_player.assigned_player_name = recovered_name
+		recovered_player.set_multiplayer_authority(peer_id)
+		recovered_player.freeze = true
+		world.add_child(recovered_player, true)
+		print("[NodeAdapter] ♻️ Recovered missing remote player node for peer ", peer_id)
+		player_node = recovered_player
 
 	# RigidPlayer will handle remote state updates via its own sync mechanism
 	# For now, we can directly update transform if it's a remote player

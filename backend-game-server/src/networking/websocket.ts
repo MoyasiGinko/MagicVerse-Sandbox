@@ -169,9 +169,22 @@ export function setupWebSocket(server: http.Server) {
             // Verify JWT token
             const user = verifyToken(token);
             if (user) {
+              try {
+                userRepo.ensureExternalUser(
+                  user.userId,
+                  user.username,
+                  user.display_name,
+                );
+              } catch (error) {
+                logError(
+                  `failed to sync authenticated user ${user.userId}: ${String(error)}`,
+                );
+                return send(ws, "error", { reason: "user_sync_failed" });
+              }
+
               session.userId = user.userId;
               session.isAuthenticated = true;
-              session.name = user.username;
+              session.name = user.display_name || user.username;
               logInfo(
                 `authenticated user: userId=${user.userId} username=${user.username}`,
               );

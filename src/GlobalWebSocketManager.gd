@@ -8,10 +8,12 @@ signal rooms_list_changed
 signal user_status_changed(user_id: int, is_online: bool)
 signal connection_established
 signal connection_lost
+signal auth_handshake_accepted(user_id: int)
 
 var ws: WebSocketPeer = null
-var server_url: String = "ws://localhost:30820"
+var server_url: String = BackendConfig.get_node_ws_url()
 var is_connected: bool = false
+var is_socket_authenticated: bool = false
 var should_reconnect: bool = false
 var reconnect_timer: Timer
 var heartbeat_timer: Timer
@@ -35,6 +37,7 @@ func _ready() -> void:
 
 func connect_to_server() -> void:
 	"""Connect to WebSocket server with authentication"""
+	server_url = BackendConfig.get_node_ws_url()
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[WSManager] ❌ Cannot connect - not authenticated")
 		return
@@ -60,6 +63,7 @@ func disconnect_from_server() -> void:
 	print("[WSManager] 🔌 Disconnecting...")
 	should_reconnect = false
 	is_connected = false
+	is_socket_authenticated = false
 
 	if heartbeat_timer:
 		heartbeat_timer.stop()
@@ -109,6 +113,7 @@ func _on_connection_lost() -> void:
 	"""Handle connection loss"""
 	print("[WSManager] ❌ Connection lost")
 	is_connected = false
+	is_socket_authenticated = false
 	heartbeat_timer.stop()
 
 	connection_lost.emit()
@@ -179,7 +184,10 @@ func _on_message_received() -> void:
 	# Route messages to appropriate handlers
 	match msg_type:
 		"handshake_accepted":
-			print("[WSManager] ✅ Handshake accepted - User ID: ", msg_data.get("user_id"))
+			var handshake_user_id: int = int(msg_data.get("user_id", 0) as float)
+			is_socket_authenticated = true
+			print("[WSManager] ✅ Handshake accepted - User ID: ", handshake_user_id)
+			auth_handshake_accepted.emit(handshake_user_id)
 
 		"rooms_changed":
 			print("[WSManager] 🔔 Rooms list changed")

@@ -241,6 +241,10 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	print("[Menu] === ROOM SELECTED FROM SERVER LIST ===")
 	print("[Menu] 🎯 Room ID: ", room_id)
 	print("[Menu] 📋 Room data: ", room_data)
+	if room_data.has("server") and room_data.get("server") is Dictionary:
+		var server_data: Dictionary = room_data.get("server") as Dictionary
+		BackendConfig.set_selected_game_server(server_data)
+		print("[Menu] 🌐 Selected server stored: ", server_data.get("id", ""))
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[Menu] ❌ Not authenticated; cannot join room")
 		return

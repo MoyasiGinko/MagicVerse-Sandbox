@@ -104,7 +104,7 @@ func fetch_available_maps() -> void:
 	is_loading_maps = true
 	print("[RoomCreation] 📤 Fetching available maps from API...")
 
-	var url := "http://localhost:30820/api/worlds"
+	var url := BackendConfig.get_django_api_base_url() + "/worlds"
 	var headers: PackedStringArray = ["Content-Type: application/json"]
 
 	var err := _http_worlds.request(url, headers)

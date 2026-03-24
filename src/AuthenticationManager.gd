@@ -6,22 +6,38 @@ signal authentication_complete(token: String, username: String)
 signal authentication_failed(reason: String)
 signal verification_complete(is_valid: bool)
 
+enum RequestType {
+	NONE,
+	REGISTER,
+	LOGIN,
+	VERIFY,
+	UPDATE_DISPLAY_NAME
+}
+
 # Backend URL
-var backend_url := "http://localhost:30820"
+var backend_url := BackendConfig.get_django_base_url()
 var http_request: HTTPRequest = null
 var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
+var current_request_type: RequestType = RequestType.NONE
 
 # Token storage
 const TOKEN_SAVE_PATH := "user://tinybox_token.json"
 
 func _ready() -> void:
+	backend_url = BackendConfig.get_django_base_url()
+	_ensure_runtime_dependencies()
+
+func _ensure_runtime_dependencies() -> void:
 	# Create HTTPRequest node for making requests
-	http_request = HTTPRequest.new()
-	add_child(http_request)
-	http_request.request_completed.connect(_on_http_request_completed)
+	if http_request == null:
+		http_request = HTTPRequest.new()
+		add_child(http_request)
+	if not http_request.request_completed.is_connected(_on_http_request_completed):
+		http_request.request_completed.connect(_on_http_request_completed)
 
 	# Get reference to WebSocket Manager
-	ws_manager = get_node_or_null("/root/WSManager") as GlobalWebSocketManager
+	if ws_manager == null:
+		ws_manager = get_node_or_null("/root/WSManager") as GlobalWebSocketManager
 
 ## Register a new user
 func register_user(username: String, email: String, password: String) -> void:
@@ -35,6 +51,7 @@ func register_user(username: String, email: String, password: String) -> void:
 		"password": password
 	}
 
+	current_request_type = RequestType.REGISTER
 	_make_request("POST", "/api/auth/register", body)
 
 ## Login existing user
@@ -48,6 +65,7 @@ func login_user(username: String, password: String) -> void:
 		"password": password
 	}
 
+	current_request_type = RequestType.LOGIN
 	_make_request("POST", "/api/auth/login", body)
 
 ## Verify saved token
@@ -56,10 +74,12 @@ func verify_token(token: String) -> void:
 		"Authorization: Bearer " + token
 	]
 
+	current_request_type = RequestType.VERIFY
 	_make_request("GET", "/api/auth/verify", {}, headers)
 
 ## Load token from disk
 func load_saved_token() -> String:
+	_ensure_runtime_dependencies()
 	if ResourceLoader.exists(TOKEN_SAVE_PATH):
 		var file: FileAccess = FileAccess.open(TOKEN_SAVE_PATH, FileAccess.READ)
 		if file:
@@ -86,6 +106,7 @@ func load_saved_token() -> String:
 	return ""
 ## Save token to disk
 func save_token(token: String, username: String, display_name: String = "") -> void:
+	_ensure_runtime_dependencies()
 	var data: Dictionary = {
 		"token": token,
 		"username": username,
@@ -108,6 +129,7 @@ func save_token(token: String, username: String, display_name: String = "") -> v
 
 ## Clear saved token
 func clear_saved_token() -> void:
+	_ensure_runtime_dependencies()
 	if ResourceLoader.exists(TOKEN_SAVE_PATH):
 		DirAccess.remove_absolute(TOKEN_SAVE_PATH)
 	Global.auth_token = ""
@@ -120,6 +142,7 @@ func clear_saved_token() -> void:
 
 ## Private helper to make HTTP requests
 func _make_request(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
+	_ensure_runtime_dependencies()
 	var url: String = backend_url + endpoint
 	var request_headers: PackedStringArray = PackedStringArray([
 		"Content-Type: application/json",
@@ -143,7 +166,11 @@ func _make_request(method: String, endpoint: String, body: Dictionary = {}, head
 
 	if error != OK:
 		print("HTTP Request error: ", error)
-		authentication_failed.emit("Request failed: " + str(error))
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		else:
+			authentication_failed.emit("Request failed: " + str(error))
+		current_request_type = RequestType.NONE
 		return
 
 ## Handle HTTP response
@@ -152,7 +179,11 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 
 	if result != HTTPRequest.RESULT_SUCCESS:
 		print("Request failed with result: ", result)
-		authentication_failed.emit("Network error")
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		else:
+			authentication_failed.emit("Network error")
+		current_request_type = RequestType.NONE
 		return
 
 	# Accept 2xx status codes (200-299) as success
@@ -164,10 +195,16 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		# Try to parse error from response
 		var json: JSON = JSON.new()
 		var response_data: Variant = json.parse_string(error_text)
-		if response_data and response_data.has("error"):
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		elif response_data and response_data.has("error"):
 			authentication_failed.emit(response_data["error"])
 		else:
-			authentication_failed.emit("Server error: " + str(response_code))
+			if current_request_type == RequestType.VERIFY:
+				verification_complete.emit(false)
+			else:
+				authentication_failed.emit("Server error: " + str(response_code))
+		current_request_type = RequestType.NONE
 		return
 
 	var response_text: String = body.get_string_from_utf8()
@@ -178,7 +215,11 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 
 	if not response_data:
 		print("Failed to parse response")
-		authentication_failed.emit("Invalid response format")
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		else:
+			authentication_failed.emit("Invalid response format")
+		current_request_type = RequestType.NONE
 		return
 
 	print("Parsed response: ", response_data)
@@ -210,7 +251,12 @@ func _on_http_request_completed(result: int, response_code: int, headers: Packed
 		print("[AuthMgr] Display name updated to: ", new_display_name)
 	else:
 		print("Unexpected response structure")
-		authentication_failed.emit("Unexpected server response")
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		else:
+			authentication_failed.emit("Unexpected server response")
+
+	current_request_type = RequestType.NONE
 
 ## Validate registration inputs
 func _validate_inputs(username: String, email: String, password: String) -> bool:
@@ -255,9 +301,11 @@ func update_display_name(new_display_name: String) -> void:
 	]
 
 	print("[AuthMgr] Sending PUT request to update display name")
+	current_request_type = RequestType.UPDATE_DISPLAY_NAME
 	_make_request_with_method("PUT", "/api/users/display-name", body, headers)
 
 func _make_request_with_method(method: String, endpoint: String, body: Dictionary = {}, headers: Array = []) -> void:
+	_ensure_runtime_dependencies()
 	var url: String = backend_url + endpoint
 	var request_headers: PackedStringArray = PackedStringArray([
 		"Content-Type: application/json",
@@ -289,5 +337,9 @@ func _make_request_with_method(method: String, endpoint: String, body: Dictionar
 
 	if error != OK:
 		print("HTTP Request error: ", error)
-		authentication_failed.emit("Request failed: " + str(error))
+		if current_request_type == RequestType.VERIFY:
+			verification_complete.emit(false)
+		else:
+			authentication_failed.emit("Request failed: " + str(error))
+		current_request_type = RequestType.NONE
 		return

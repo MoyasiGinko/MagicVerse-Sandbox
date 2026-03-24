@@ -28,7 +28,7 @@ const NETWORK_COMPRESSION_MODE := ENetConnection.CompressionMode.COMPRESS_FASTLZ
 # Backend selection: "enet" (default) or "node"
 # Set via UserPreferences or config file
 var backend := "enet"
-var node_server_url := "ws://localhost:30820"
+var node_server_url := BackendConfig.get_node_ws_url()
 var play_mode := "classic" # "classic" (ENet) or "global" (Node)
 
 # thread for UPNP connection
@@ -92,6 +92,7 @@ var display_version := "beta 13.2pre"
 var auth_manager: AuthenticationManager
 
 func _ready() -> void:
+	node_server_url = BackendConfig.get_node_ws_url()
 	# reset paused state
 	Global.is_paused = false
 	# Clear the graphics cache when entering the main menu.
@@ -789,6 +790,7 @@ func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
 	if player_list and player_list.has_method("add_player_from_server"):
 		player_list.add_player_from_server(peer_id, peer_name, 0)
 		print("[Main] ✅ Added new peer to player list")
+		_refresh_member_lists()
 	else:
 		print("[Main] ⚠️ PlayerList not found")
 
@@ -821,6 +823,7 @@ func _on_connection_failed(reason: String) -> void:
 
 func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Field", gamemode: String = "Deathmatch") -> void:
 	"""Setup WebSocket multiplayer as host - uses MultiplayerNodeAdapter"""
+	node_server_url = BackendConfig.get_node_ws_url()
 	print("[Main] 🌐 === WEBSOCKET HOST SETUP ===")
 	if room_id != "":
 		print("[Main] 🔑 Room ID (from HTTP API): ", room_id)
@@ -890,6 +893,7 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 
 func _setup_websocket_client(room_code: String) -> void:
 	"""Setup WebSocket multiplayer as client - uses MultiplayerNodeAdapter"""
+	node_server_url = BackendConfig.get_node_ws_url()
 	print("[Main] 🌐 === WEBSOCKET CLIENT SETUP ===")
 
 	# Create Node adapter

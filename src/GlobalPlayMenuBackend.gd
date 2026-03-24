@@ -4,11 +4,13 @@ class_name GlobalPlayMenuBackend
 signal rooms_fetched(rooms: Array)
 signal room_created(room_id: String, room_data: Dictionary)
 
-@export var base_api_url: String = "http://localhost:30820/api"
+@export var base_api_url: String = ""
 var _http_rooms: HTTPRequest
 var _http_create: HTTPRequest
 
 func _ready() -> void:
+	if base_api_url.strip_edges() == "":
+		base_api_url = BackendConfig.get_node_api_base_url()
 	_http_rooms = HTTPRequest.new()
 	add_child(_http_rooms)
 	_http_rooms.request_completed.connect(_on_rooms_response)

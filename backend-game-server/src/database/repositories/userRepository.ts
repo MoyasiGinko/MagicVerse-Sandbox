@@ -20,6 +20,85 @@ export interface CreateUserInput {
 export class UserRepository {
   private db = getDatabase();
 
+  private ensurePlayerStatsRow(userId: number): void {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO player_stats (user_id)
+      VALUES (?)
+    `);
+    stmt.run(userId);
+  }
+
+  ensureExternalUser(
+    userId: number,
+    username: string,
+    displayName?: string,
+  ): User | null {
+    const trimmedUsername = username.trim();
+    if (trimmedUsername.length === 0) {
+      return null;
+    }
+
+    const existingById = this.getUserById(userId);
+    if (existingById) {
+      const desiredDisplayName =
+        displayName && displayName.trim().length > 0
+          ? displayName.trim()
+          : existingById.display_name || existingById.username;
+
+      const updateStmt = this.db.prepare(`
+        UPDATE users
+        SET username = ?,
+            display_name = ?,
+            is_active = 1
+        WHERE id = ?
+      `);
+
+      try {
+        updateStmt.run(trimmedUsername, desiredDisplayName, userId);
+      } catch {
+        // If username conflicts with an existing legacy/local user, keep existing username.
+        const fallbackStmt = this.db.prepare(`
+          UPDATE users
+          SET display_name = ?,
+              is_active = 1
+          WHERE id = ?
+        `);
+        fallbackStmt.run(desiredDisplayName, userId);
+      }
+
+      this.ensurePlayerStatsRow(userId);
+      return this.getUserById(userId);
+    }
+
+    let effectiveUsername = trimmedUsername;
+    const existingByUsername = this.getUserByUsername(trimmedUsername);
+    if (existingByUsername && existingByUsername.id !== userId) {
+      effectiveUsername = `${trimmedUsername}_${userId}`;
+    }
+
+    const effectiveDisplayName =
+      displayName && displayName.trim().length > 0
+        ? displayName.trim()
+        : trimmedUsername;
+    const syntheticEmail = `django_user_${userId}@local.invalid`;
+    const syntheticPasswordHash = "external_auth";
+
+    const insertStmt = this.db.prepare(`
+      INSERT INTO users (id, username, email, password_hash, display_name, is_active)
+      VALUES (?, ?, ?, ?, ?, 1)
+    `);
+
+    insertStmt.run(
+      userId,
+      effectiveUsername,
+      syntheticEmail,
+      syntheticPasswordHash,
+      effectiveDisplayName,
+    );
+    this.ensurePlayerStatsRow(userId);
+    return this.getUserById(userId);
+  }
+
   createUser(input: CreateUserInput): User {
     const stmt = this.db.prepare(`
             INSERT INTO users (username, email, password_hash, display_name)
@@ -30,15 +109,11 @@ export class UserRepository {
       input.username,
       input.email,
       input.password_hash,
-      input.username
+      input.username,
     );
 
     // Create initial stats for the user
-    const statsStmt = this.db.prepare(`
-            INSERT INTO player_stats (user_id)
-            VALUES (?)
-        `);
-    statsStmt.run(result.lastInsertRowid);
+    this.ensurePlayerStatsRow(result.lastInsertRowid as number);
 
     return this.getUserById(result.lastInsertRowid as number)!;
   }
@@ -77,7 +152,7 @@ export class UserRepository {
     console.log(
       `[CHECK] isUsernameTaken('${username}'): ${taken} (user:`,
       user,
-      `)`
+      `)`,
     );
     return taken;
   }
@@ -91,7 +166,7 @@ export class UserRepository {
 
   getAllUsers(): User[] {
     const stmt = this.db.prepare(
-      "SELECT * FROM users WHERE is_active = 1 ORDER BY username ASC"
+      "SELECT * FROM users WHERE is_active = 1 ORDER BY username ASC",
     );
     return stmt.all() as User[];
   }

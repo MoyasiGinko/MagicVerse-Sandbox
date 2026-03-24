@@ -95,7 +95,7 @@ func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
 	if not Global.is_authenticated or Global.auth_token == "":
 		return
-	var url := "http://localhost:30820/api/rooms"
+	var url := BackendConfig.get_node_api_base_url() + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
 		"Content-Type: application/json"
@@ -253,6 +253,9 @@ func _show_error_state(error_message: String) -> void:
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
+	if room.has("server") and room.get("server") is Dictionary:
+		var server_data: Dictionary = room.get("server") as Dictionary
+		BackendConfig.set_selected_game_server(server_data)
 	var gamemode: String = room.get("gamemode", "Unknown") as String
 	var map: String = room.get("map_name", "Unknown") as String
 	var host: String = room.get("host_username", "Unknown") as String
