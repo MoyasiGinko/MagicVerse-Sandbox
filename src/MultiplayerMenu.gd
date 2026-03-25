@@ -22,9 +22,15 @@ class_name MultiplayerMenu
 @onready var quit_dialog : PanelContainer = $QuitDialog
 @onready var shirt_colour_picker : Control = $AppearanceMenu/ShirtPanel/ShirtPanelContainer/ColorPickerButton
 @onready var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
+@onready var global_server_list_panel: PanelContainer = $GlobalPlayMenu/ServerList
+@onready var global_server_list_button: Button = $GlobalPlayMenu/HostHbox/ServerListButton
 var global_server_list: GlobalServerList
 var room_creation_dialog: RoomCreationDialog
 var auth_manager: AuthenticationManager
+var game_servers_request: HTTPRequest
+var game_server_dialog: AcceptDialog
+var game_server_status_label: Label
+var game_server_list_container: VBoxContainer
 var _last_display_name: String = ""
 
 func _ready() -> void:
@@ -56,7 +62,12 @@ func _ready() -> void:
 	# Connect GlobalPlayMenu buttons (renamed to avoid classic menu collisions)
 	$GlobalPlayMenu/HostHbox/HostServer.connect("pressed", _on_global_host_pressed)
 	$GlobalPlayMenu/JoinHbox/JoinRoom.connect("pressed", _on_global_join_pressed)
+	$GlobalPlayMenu/HostHbox/ServerListButton.connect("pressed", _on_global_server_list_pressed)
 	print("[Menu] GlobalPlayMenu host/join buttons connected")
+
+	game_servers_request = HTTPRequest.new()
+	add_child(game_servers_request)
+	game_servers_request.request_completed.connect(_on_game_servers_response)
 
 	shirt_colour_picker.connect("color_changed", Global.set_shirt_colour)
 	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
@@ -93,6 +104,9 @@ func _ready() -> void:
 	if global_server_list and global_server_list.has_signal("room_selected"):
 		global_server_list.room_selected.connect(_on_global_room_selected)
 		print("[Menu] GlobalServerList connected")
+
+	if global_server_list_panel:
+		global_server_list_panel.visible = false
 
 	# Connect to RoomCreationDialog signals
 	room_creation_dialog = $RoomCreationDialog
@@ -197,6 +211,156 @@ func _on_global_host_pressed() -> void:
 		print("[Menu] Room creation dialog opened")
 	else:
 		print("[Menu] ❌ Room creation dialog not found!")
+
+func _on_global_server_list_pressed() -> void:
+	"""Open Django-backed game server selector, then load rooms from selected server"""
+	if not Global.is_authenticated or Global.auth_token == "":
+		print("[Menu] ❌ Must be authenticated to select a server")
+		return
+
+	_ensure_game_server_dialog()
+	if not game_server_dialog or not game_server_status_label:
+		print("[Menu] ❌ Failed to build game server dialog")
+		return
+
+	_clear_game_server_entries()
+	game_server_status_label.text = "Loading available servers..."
+	game_server_dialog.popup_centered(Vector2i(620, 460))
+
+	var url := BackendConfig.get_django_api_base_url() + "/game-servers"
+	var headers: PackedStringArray = [
+		"Authorization: Bearer " + Global.auth_token,
+		"Content-Type: application/json"
+	]
+	var err := game_servers_request.request(url, headers)
+	if err != OK:
+		game_server_status_label.text = "Failed to query server registry"
+		print("[Menu] ❌ Game server list request failed: ", err)
+
+func _ensure_game_server_dialog() -> void:
+	if game_server_dialog:
+		return
+
+	game_server_dialog = AcceptDialog.new()
+	game_server_dialog.title = "Select Game Server"
+	game_server_dialog.min_size = Vector2i(620, 460)
+	game_server_dialog.dialog_text = ""
+	add_child(game_server_dialog)
+
+	var root := VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	game_server_dialog.add_child(root)
+
+	game_server_status_label = Label.new()
+	game_server_status_label.text = ""
+	game_server_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root.add_child(game_server_status_label)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	root.add_child(spacer)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 300)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+
+	game_server_list_container = VBoxContainer.new()
+	game_server_list_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	game_server_list_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	game_server_list_container.add_theme_constant_override("separation", 8)
+	scroll.add_child(game_server_list_container)
+
+	var ok_button := game_server_dialog.get_ok_button()
+	if ok_button:
+		ok_button.text = "Close"
+
+func _clear_game_server_entries() -> void:
+	if not game_server_list_container:
+		return
+	for child in game_server_list_container.get_children():
+		child.queue_free()
+
+func _on_game_servers_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	if not game_server_status_label:
+		return
+
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		game_server_status_label.text = "Could not load servers from Django registry"
+		return
+
+	var json_text := body.get_string_from_utf8()
+	var json := JSON.new()
+	if json.parse(json_text) != OK or not (json.data is Dictionary):
+		game_server_status_label.text = "Server registry response was invalid"
+		return
+
+	var payload := json.data as Dictionary
+	var servers := payload.get("servers", []) as Array
+	_clear_game_server_entries()
+
+	if servers.is_empty():
+		game_server_status_label.text = "No active servers found"
+		return
+
+	game_server_status_label.text = "Select a server to browse and join rooms"
+	for entry_value: Variant in servers:
+		if not (entry_value is Dictionary):
+			continue
+		_create_game_server_entry(entry_value as Dictionary)
+
+func _create_game_server_entry(server_data: Dictionary) -> void:
+	if not game_server_list_container:
+		return
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(0, 70)
+	game_server_list_container.add_child(card)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	card.add_child(row)
+
+	var text_col := VBoxContainer.new()
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text_col)
+
+	var name_label := Label.new()
+	var server_name := str(server_data.get("name", "Unnamed Server"))
+	var region := str(server_data.get("region", "global"))
+	var current_players := str(server_data.get("current_players", 0)).to_int()
+	var max_players := str(server_data.get("max_players", 64)).to_int()
+	name_label.text = "%s (%s)  %d/%d" % [server_name, region, current_players, max_players]
+	text_col.add_child(name_label)
+
+	var url_label := Label.new()
+	url_label.modulate = Color(1, 1, 1, 0.65)
+	url_label.text = str(server_data.get("api_url", ""))
+	text_col.add_child(url_label)
+
+	var select_button := Button.new()
+	select_button.text = "Select"
+	select_button.custom_minimum_size = Vector2(90, 0)
+	select_button.pressed.connect(_on_game_server_selected.bind(server_data))
+	row.add_child(select_button)
+
+func _on_game_server_selected(server_data: Dictionary) -> void:
+	BackendConfig.set_selected_game_server(server_data)
+	var selected_name := str(server_data.get("name", "Server List"))
+	global_server_list_button.text = selected_name
+
+	if game_server_dialog:
+		game_server_dialog.hide()
+
+	if global_server_list_panel:
+		global_server_list_panel.visible = true
+
+	if global_server_list:
+		global_server_list.refresh_server_list()
+
+	print("[Menu] 🌐 Selected game server: ", selected_name)
 
 func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	"""Handle new room creation - this is the HOST"""

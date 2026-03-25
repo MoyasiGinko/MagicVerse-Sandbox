@@ -344,6 +344,12 @@ func close() -> void:
 	if ws:
 		ws.close()
 	_is_connected = false
+	_is_server = false
+	_room_id = ""
+	_peer_id = 0
+	_connected_peers.clear()
+	_pending_members.clear()
+	room_members.clear()
 
 func get_peer_id() -> int:
 	return _peer_id
@@ -450,6 +456,14 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	"""Handle notification that a new peer joined the room"""
 	var peer_id: int = data.get("peerId", 0) as int
 	var name: String = data.get("name", "Unknown") as String
+	if peer_id <= 0:
+		return
+
+	# Joiners can receive peer_joined before room_joined assigns local peer id.
+	# Ignore early events; room_joined contains authoritative membership.
+	if _peer_id <= 0:
+		print("[NodeAdapter] ⏭️ Ignoring peer_joined before room_joined: peerId=", peer_id)
+		return
 	# Ignore duplicate/self join notifications
 	if peer_id == _peer_id:
 		return
@@ -480,6 +494,9 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	if not world:
 		print("[NodeAdapter] ❌ World not found - storing as pending")
 		_pending_members.append({"peerId": peer_id, "name": name})
+		return
+	if world.has_node(str(peer_id)):
+		print("[NodeAdapter] ⏭️ Player node already exists for peer ", peer_id)
 		return
 
 	print("[NodeAdapter] ✅ World found, spawning RigidPlayer for peer ", peer_id, " name=", name)
@@ -522,6 +539,8 @@ func _handle_peer_left(data: Dictionary) -> void:
 
 func _handle_player_state(data: Dictionary) -> void:
 	"""Handle incoming player state (position, rotation, velocity, animation state, animation blends)"""
+	if _peer_id <= 0:
+		return
 	var peer_id: int = data.get("peerId", 0) as int
 	# Never apply replicated state to the local authority player.
 	if peer_id == _peer_id:

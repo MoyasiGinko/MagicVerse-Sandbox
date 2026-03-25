@@ -653,12 +653,26 @@ func _on_host_disconnect_as_client() -> void:
 	leave_server()
 
 func leave_server() -> void:
+	_cleanup_node_multiplayer_state()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	enet_peer.close()
 	if udp_server != null:
 		udp_server.udp_server.stop()
 	Global.connected_to_server = false
 	get_tree().change_scene_to_file("res://data/scene/MainScene.tscn")
+
+func _cleanup_node_multiplayer_state() -> void:
+	"""Close and dispose Node adapter state to prevent stale room/session reuse."""
+	if node_peer != null:
+		node_peer.close()
+		if is_instance_valid(node_peer):
+			node_peer.queue_free()
+		node_peer = null
+
+	if has_meta("node_adapter"):
+		remove_meta("node_adapter")
+	if has_meta("adapter_wrapper"):
+		remove_meta("adapter_wrapper")
 
 # Kick or disconnect from the server with a reason.
 func kick_client(reason : String) -> void:
@@ -823,6 +837,7 @@ func _on_connection_failed(reason: String) -> void:
 
 func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Field", gamemode: String = "Deathmatch") -> void:
 	"""Setup WebSocket multiplayer as host - uses MultiplayerNodeAdapter"""
+	_cleanup_node_multiplayer_state()
 	node_server_url = BackendConfig.get_node_ws_url()
 	print("[Main] 🌐 === WEBSOCKET HOST SETUP ===")
 	if room_id != "":
@@ -893,6 +908,7 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 
 func _setup_websocket_client(room_code: String) -> void:
 	"""Setup WebSocket multiplayer as client - uses MultiplayerNodeAdapter"""
+	_cleanup_node_multiplayer_state()
 	node_server_url = BackendConfig.get_node_ws_url()
 	print("[Main] 🌐 === WEBSOCKET CLIENT SETUP ===")
 
@@ -968,6 +984,12 @@ func _load_world_and_start(map_name: String) -> void:
 	# Spawn local player character
 	if node_peer:
 		var local_peer_id: int = node_peer.get_unique_peer_id()
+		var existing_local: Node = $World.get_node_or_null(str(local_peer_id))
+		if existing_local != null:
+			if existing_local is RigidPlayer:
+				Global.get_world().remove_player_from_list(existing_local as RigidPlayer)
+			existing_local.queue_free()
+			await get_tree().process_frame
 		print("[Main] 👤 Spawning local player (peer_id=", local_peer_id, ")...")
 		var player: RigidPlayer = PLAYER.instantiate()
 		player.name = str(local_peer_id)
@@ -985,6 +1007,8 @@ func _load_world_and_start(map_name: String) -> void:
 
 			# Skip local player
 			if member_peer_id == node_peer.get_unique_peer_id():
+				continue
+			if $World.has_node(str(member_peer_id)):
 				continue
 
 			print("[Main] 👤 Spawning RigidPlayer for peer: ", member_peer_id, " name: ", member_name)

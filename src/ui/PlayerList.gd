@@ -31,7 +31,12 @@ func find_players() -> void:
 	# add existing players if this is added to scene later.
 	# if the players are already in the list, it will skip them
 	# in add_player.
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
+	for player_ref: Variant in Global.get_world().rigidplayer_list:
+		if not is_instance_valid(player_ref):
+			continue
+		var p := player_ref as RigidPlayer
+		if p == null:
+			continue
 		add_player(p)
 	# also try to populate from node backend room members if available
 	var adapter := _get_node_adapter()
@@ -51,14 +56,23 @@ func refresh_from_adapter() -> void:
 	_populate_from_adapter(adapter)
 
 func update_list() -> void:
-	for entry in get_children():
-		for player : RigidPlayer in Global.get_world().rigidplayer_list:
+	for entry: Node in get_children():
+		if not is_instance_valid(entry):
+			continue
+		for player_ref: Variant in Global.get_world().rigidplayer_list:
+			if not is_instance_valid(player_ref):
+				continue
+			var player := player_ref as RigidPlayer
+			if player == null:
+				continue
 			# compare IDs
 			if str(player.name) == str(entry.name):
-				var k : Label = entry.get_node("HBoxContainer/K")
-				var d : Label = entry.get_node("HBoxContainer/D")
-				var capture : Label = entry.get_node("HBoxContainer/CaptureTime")
-				var player_team : Label = entry.get_node("HBoxContainer/Team")
+				var k : Label = entry.get_node_or_null("HBoxContainer/K")
+				var d : Label = entry.get_node_or_null("HBoxContainer/D")
+				var capture : Label = entry.get_node_or_null("HBoxContainer/CaptureTime")
+				var player_team : Label = entry.get_node_or_null("HBoxContainer/Team")
+				if k == null or d == null or capture == null or player_team == null:
+					continue
 				k.text = str(player.kills)
 				d.text = str(player.deaths)
 				# if player has capture time

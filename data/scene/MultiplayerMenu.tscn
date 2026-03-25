@@ -539,6 +539,7 @@ custom_minimum_size = Vector2(2.08165e-12, 16)
 layout_mode = 2
 
 [node name="ServerList" type="PanelContainer" parent="GlobalPlayMenu"]
+visible = false
 custom_minimum_size = Vector2(420, 2.08165e-12)
 layout_mode = 2
 size_flags_vertical = 3
@@ -589,11 +590,11 @@ text = "Host Server"
 script = ExtResource("2_o48rt")
 json_text = "ui/host_server"
 
-[node name="EditSettings" type="Button" parent="GlobalPlayMenu/HostHbox"]
+[node name="ServerListButton" type="Button" parent="GlobalPlayMenu/HostHbox"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.3
-text = "+"
+size_flags_stretch_ratio = 0.9
+text = "Select Server"
 script = ExtResource("2_o48rt")
 
 [node name="JoinHbox" type="HBoxContainer" parent="GlobalPlayMenu"]
