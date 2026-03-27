@@ -1,7 +1,10 @@
 import express, { Request, Response } from "express";
 import http from "http";
 import config from "./config";
-import { setupWebSocket } from "./networking/websocket";
+import {
+  notifyAllClientsRoomsChanged,
+  setupWebSocket,
+} from "./networking/websocket";
 import { runMigrations } from "./database/migrations";
 import { RoomRepository } from "./database/repositories/roomRepository";
 import authRoutes from "./api/authRoutes";
@@ -71,6 +74,10 @@ setInterval(() => {
   const cleaned = roomRepo.cleanupInactiveRooms(1);
   if (cleaned > 0) {
     console.log(`🗑️  Cleaned up ${cleaned} inactive room(s)`);
+  }
+
+  if (markedInactive > 0 || cleaned > 0) {
+    notifyAllClientsRoomsChanged();
   }
 }, 30 * 1000);
 

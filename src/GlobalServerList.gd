@@ -28,6 +28,11 @@ var refresh_timer: Timer
 var current_rooms: Array = []
 var _http_refresh: HTTPRequest  # Dedicated HTTPRequest for continuous refreshes
 var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
+var _last_join_click_time_ms: int = 0
+var _last_join_room_id: String = ""
+var _join_in_progress: bool = false
+const JOIN_CLICK_DEBOUNCE_MS: int = 2000
+const REALTIME_REFRESH_INTERVAL_SEC: float = 2.0
 
 func _ready() -> void:
 	print("[ServerList] Initializing...")
@@ -62,6 +67,14 @@ func _ready() -> void:
 	_http_refresh = HTTPRequest.new()
 	add_child(_http_refresh)
 	_http_refresh.request_completed.connect(_on_refresh_response)
+
+	# Periodic fallback refresh keeps list state fresh even if a WS event is missed.
+	refresh_timer = Timer.new()
+	add_child(refresh_timer)
+	refresh_timer.wait_time = REALTIME_REFRESH_INTERVAL_SEC
+	refresh_timer.one_shot = false
+	refresh_timer.timeout.connect(_on_realtime_refresh_tick)
+	refresh_timer.start()
 
 	# Connect refresh button if it exists
 	if refresh_button:
@@ -133,6 +146,14 @@ func _on_websocket_connected() -> void:
 func _on_refresh_button_pressed() -> void:
 	"""Handle manual refresh button press"""
 	print("[ServerList] 🔘 Manual refresh button pressed")
+	refresh_server_list()
+
+func _on_realtime_refresh_tick() -> void:
+	"""Fallback real-time refresh while menu list is visible."""
+	if not is_visible_in_tree():
+		return
+	if not Global.is_authenticated or Global.auth_token == "":
+		return
 	refresh_server_list()
 
 func _populate_server_list(rooms: Array) -> void:
@@ -213,7 +234,8 @@ func _create_room_entry(room: Dictionary) -> void:
 	var join_button := Button.new()
 	join_button.text = "Join"
 	join_button.custom_minimum_size = Vector2(60, 0)
-	join_button.disabled = is_full
+	join_button.set_meta("room_is_full", is_full)
+	join_button.disabled = is_full or _join_in_progress
 
 	var room_id: String = str(room.get("id", ""))
 	print("[ServerList] 🔗 Connecting join button for room: ", room_id)
@@ -224,6 +246,35 @@ func _create_room_entry(room: Dictionary) -> void:
 	# Add to list
 	print("[ServerList] ✅ Adding room entry to container")
 	list_container.add_child(container)
+
+func set_join_in_progress(in_progress: bool) -> void:
+	"""Enable/disable room join actions while a join attempt is active."""
+	_join_in_progress = in_progress
+	_refresh_join_buttons_state()
+
+func _refresh_join_buttons_state() -> void:
+	"""Apply current join lock state to all visible join buttons."""
+	if not list_container:
+		return
+
+	for entry: Node in list_container.get_children():
+		if not (entry is PanelContainer):
+			continue
+		var hbox: HBoxContainer = entry.get_child(0) as HBoxContainer
+		if not hbox:
+			continue
+		var join_button: Button = hbox.get_child(hbox.get_child_count() - 1) as Button
+		if not join_button:
+			continue
+		var is_full_meta: Variant = join_button.get_meta("room_is_full", false)
+		var is_full: bool = false
+		if is_full_meta is bool:
+			is_full = is_full_meta as bool
+		elif is_full_meta is int:
+			is_full = (is_full_meta as int) != 0
+		elif is_full_meta is float:
+			is_full = (is_full_meta as float) != 0.0
+		join_button.disabled = _join_in_progress or is_full
 
 func _show_empty_state() -> void:
 	"""Show empty state when no rooms available"""
@@ -253,6 +304,18 @@ func _show_error_state(error_message: String) -> void:
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
+	if _join_in_progress:
+		print("[ServerList] ⏳ Join is currently in progress; ignoring click for room: ", room_id)
+		return
+
+	var now_ms: int = Time.get_ticks_msec()
+	if _last_join_room_id == room_id and (now_ms - _last_join_click_time_ms) < JOIN_CLICK_DEBOUNCE_MS:
+		print("[ServerList] ⏳ Ignoring duplicate join click for room: ", room_id)
+		return
+
+	_last_join_room_id = room_id
+	_last_join_click_time_ms = now_ms
+
 	if room.has("server") and room.get("server") is Dictionary:
 		var server_data: Dictionary = room.get("server") as Dictionary
 		BackendConfig.set_selected_game_server(server_data)

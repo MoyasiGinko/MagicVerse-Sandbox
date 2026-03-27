@@ -249,16 +249,19 @@ export class RoomRepository {
       stmt.run(userId, roomId);
       console.log(`[RoomRepo] ❌ Player ${userId} removed from room ${roomId}`);
 
-      // Decrement room player count
-      const room = this.getRoomById(roomId);
-      if (room) {
-        const newCount = Math.max(0, room.current_players - 1);
-        this.updatePlayerCount(roomId, newCount);
-        console.log(
-          `[RoomRepo] 👥 Room ${roomId} player count: ${room.current_players} -> ${newCount}`,
-        );
+      // Recalculate room player count from authoritative sessions table.
+      const countStmt = this.db.prepare(
+        "SELECT COUNT(*) as count FROM player_sessions WHERE room_id = ?",
+      );
+      const countResult = countStmt.get(roomId) as { count: number };
+      const actualCount = countResult.count;
+      this.updatePlayerCount(roomId, actualCount);
+      console.log(
+        `[RoomRepo] 👥 Room ${roomId} player count synced to actual sessions: ${actualCount}`,
+      );
 
-        // Deactivate if empty
+      // Deactivate immediately when the room becomes empty.
+      if (actualCount <= 0) {
         this.deactivateIfEmpty(roomId);
       }
       return true;

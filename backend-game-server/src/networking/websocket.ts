@@ -212,6 +212,9 @@ function cleanupClient(ws: WebSocket) {
         }
       }
 
+      // Keep room list UI in sync when membership/room state may have changed.
+      notifyAllClientsRoomsChanged();
+
       // If the host left and there are still players, promote the next player
       const remainingMembers = roomManager.getRoomMembers(roomId);
       if (wasHost && remainingMembers.length > 0) {
@@ -458,6 +461,10 @@ export function setupWebSocket(server: http.Server) {
           session.username = identity.username;
           session.name = identity.displayName;
           activeUserRoomLocks.set(identity.userId, { roomId, ws });
+
+          // Host confirmation updates room membership count/state.
+          notifyAllClientsRoomsChanged();
+
           send(ws, "room_created", {
             roomId: roomId,
             peerId: hostPeerId,
@@ -561,18 +568,24 @@ export function setupWebSocket(server: http.Server) {
             `[WebSocket] 📥 join_room request: user=${identity.userId} username=${identity.username} room=${roomId} display=${playerName}`,
           );
 
+          // Never allow joins into inactive/missing rooms.
+          const dbRoom = roomRepo.getRoomById(roomId);
+          if (!dbRoom) {
+            releaseJoinLock();
+            return send(ws, "error", { reason: "room_not_found" });
+          }
+          if (!dbRoom.is_active) {
+            releaseJoinLock();
+            return send(ws, "error", {
+              reason: "room_inactive",
+              message: "Room is inactive and can no longer be joined.",
+            });
+          }
+
           // Check if room exists in memory; if not, try to load from database
           let room = roomManager.getRoom(roomId);
           if (!room) {
             // Room not in memory yet; create it from database info
-            const dbRoom = roomRepo.getRoomById(roomId);
-            if (!dbRoom) {
-              console.log(
-                `[WebSocket] ❌ join_room: Room ${roomId} not found in database`,
-              );
-              releaseJoinLock();
-              return send(ws, "error", { reason: "room_not_found" });
-            }
             // Create room in memory with info from database
             room = roomManager.createRoomWithId(
               roomId,
@@ -693,8 +706,8 @@ export function setupWebSocket(server: http.Server) {
             members.map((m) => `peer=${m.peerId} name=${m.name}`),
           );
 
-          // Get room info from database to include gamemode and map
-          const dbRoom = roomRepo.getRoomById(roomId);
+          // Player count/state may have changed due to successful join.
+          notifyAllClientsRoomsChanged();
 
           send(ws, "room_joined", {
             roomId: roomId,

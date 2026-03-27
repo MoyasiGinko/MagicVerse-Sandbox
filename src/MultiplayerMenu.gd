@@ -435,6 +435,8 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	main.play_mode = "global"
 	main.backend = "node"
 	_global_join_in_progress = true
+	if global_server_list:
+		global_server_list.set_join_in_progress(true)
 
 	# Extract map and gamemode from room data
 	var map_name: String = str(room_data.get("map_name", ""))
@@ -448,6 +450,9 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	# If still in menu scene, allow retries after prior attempt completes.
 	if is_inside_tree():
 		_global_join_in_progress = false
+		if global_server_list:
+			global_server_list.set_join_in_progress(false)
+			global_server_list.refresh_server_list()
 
 func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""

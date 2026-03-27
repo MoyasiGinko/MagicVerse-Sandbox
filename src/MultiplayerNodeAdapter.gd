@@ -257,6 +257,8 @@ func _handle_error(data: Dictionary) -> void:
 				message = "User profile is invalid or inactive. Please log in again."
 			"room_not_found":
 				message = "Room not found or no longer active."
+			"room_inactive":
+				message = "Room is inactive and can no longer be joined."
 			"version_mismatch":
 				message = "Version mismatch. Update game/client and try again."
 			"name_taken":
