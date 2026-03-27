@@ -90,6 +90,10 @@ var display_version := "beta 13.2pre"
 
 # Authentication manager for API calls
 var auth_manager: AuthenticationManager
+var _ws_join_waiting: bool = false
+var _ws_join_succeeded: bool = false
+var _ws_join_failed: bool = false
+var _ws_join_fail_reason: String = ""
 
 func _ready() -> void:
 	node_server_url = BackendConfig.get_node_ws_url()
@@ -794,6 +798,8 @@ func _on_room_created(room_id: String) -> void:
 
 func _on_room_joined(peer_id: int, room_id: String) -> void:
 	print("Joined room ", room_id, " as peer ", peer_id)
+	if _ws_join_waiting:
+		_ws_join_succeeded = true
 	UIHandler.show_alert("Connected as peer " + str(peer_id), 4, false, UIHandler.alert_colour_player)
 
 func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
@@ -819,6 +825,9 @@ func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
 				local_player.sync_active_tool_to_peers(peer_id)
 
 func _on_connection_failed(reason: String) -> void:
+	if _ws_join_waiting:
+		_ws_join_failed = true
+		_ws_join_fail_reason = reason
 	push_error("Node backend connection failed: " + reason)
 	UIHandler.show_alert("Connection failed: " + reason, 8, false, UIHandler.alert_colour_error)
 	host_button.disabled = false
@@ -832,6 +841,31 @@ func _on_connection_failed(reason: String) -> void:
 	if global_join_button:
 		global_join_button.text = "Join (Global)"
 		global_join_button.disabled = false
+
+func _begin_ws_join_wait() -> void:
+	_ws_join_waiting = true
+	_ws_join_succeeded = false
+	_ws_join_failed = false
+	_ws_join_fail_reason = ""
+
+func _finish_ws_join_wait() -> void:
+	_ws_join_waiting = false
+
+func _wait_for_ws_join_result(timeout_seconds: float = 8.0) -> bool:
+	var deadline_ms: int = Time.get_ticks_msec() + int(timeout_seconds * 1000.0)
+	while Time.get_ticks_msec() < deadline_ms:
+		if _ws_join_succeeded:
+			_finish_ws_join_wait()
+			return true
+		if _ws_join_failed:
+			_finish_ws_join_wait()
+			return false
+		await get_tree().create_timer(0.05).timeout
+
+	_finish_ws_join_wait()
+	if !_ws_join_failed:
+		UIHandler.show_alert("Failed to join room: timed out waiting for server response.", 8, false, UIHandler.alert_colour_error)
+	return false
 
 ## NEW WEBSOCKET MULTIPLAYER PEER IMPLEMENTATION
 
@@ -883,11 +917,14 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 
 # Join or create room
 	if room_id != "":
-		print("[Main] 📥 Joining existing room (created via HTTP API): ", room_id)
-		node_peer.join_room(room_id, str(server_version), Global.display_name)
-		# Wait for backend to confirm room join
-		print("[Main] ⏳ Waiting for room_joined confirmation...")
-		await node_peer.room_joined
+		print("[Main] 👑 Confirming created room as host via WebSocket: ", room_id)
+		_begin_ws_join_wait()
+		node_peer.create_room(str(server_version), Global.display_name, gamemode, map_name)
+		# Backend create_room confirmation emits room_created and host room_joined in adapter.
+		print("[Main] ⏳ Waiting for host room confirmation...")
+		if not await _wait_for_ws_join_result(8.0):
+			_reset_host_buttons()
+			return
 		_refresh_member_lists()
 	else:
 		print("[Main] 📤 Creating new room via WebSocket...")
@@ -944,11 +981,14 @@ func _setup_websocket_client(room_code: String) -> void:
 
 	# Join room
 	print("[Main] 📤 Joining room: ", room_code)
+	_begin_ws_join_wait()
 	node_peer.join_room(room_code, str(server_version), Global.display_name)
 
 	# Wait for backend to confirm room join (get peer_id and member list)
 	print("[Main] ⏳ Waiting for room_joined confirmation...")
-	await node_peer.room_joined
+	if not await _wait_for_ws_join_result(8.0):
+		_reset_join_buttons()
+		return
 	print("[Main] ✅ Room joined, peer_id=", node_peer.get_unique_peer_id())
 	_refresh_member_lists()
 

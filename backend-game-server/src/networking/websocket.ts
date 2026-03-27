@@ -12,6 +12,7 @@ type ClientSession = {
   ws: WebSocket;
   peerId: number | null;
   roomId: string | null;
+  username: string;
   name: string;
   version: string;
   ip: string;
@@ -23,6 +24,23 @@ const roomManager = new RoomManager();
 const clientSessions = new Map<WebSocket, ClientSession>();
 const roomRepo = new RoomRepository();
 const userRepo = new UserRepository();
+const activeUserRoomLocks = new Map<
+  number,
+  { roomId: string; ws: WebSocket }
+>();
+
+type IdentityValidationResult =
+  | {
+      ok: true;
+      userId: number;
+      username: string;
+      displayName: string;
+    }
+  | {
+      ok: false;
+      reason: string;
+      message: string;
+    };
 
 function getClientIp(ws: WebSocket): string {
   const remoteAddr =
@@ -76,13 +94,91 @@ function validateJson(raw: string): Message | null {
   }
 }
 
+function validateSessionIdentity(
+  session: ClientSession,
+): IdentityValidationResult {
+  if (!session.isAuthenticated || !session.userId) {
+    return {
+      ok: false,
+      reason: "authentication_required",
+      message: "Authentication required",
+    };
+  }
+
+  const dbUser = userRepo.getUserById(session.userId);
+  if (!dbUser || !dbUser.is_active) {
+    return {
+      ok: false,
+      reason: "invalid_user_profile",
+      message: "User profile not found or inactive",
+    };
+  }
+
+  const dbUsername = dbUser.username.trim();
+  const tokenUsername = session.username.trim();
+  if (dbUsername.length === 0 || tokenUsername.length === 0) {
+    return {
+      ok: false,
+      reason: "invalid_user_profile",
+      message: "Invalid user identity data",
+    };
+  }
+
+  if (dbUsername !== tokenUsername) {
+    return {
+      ok: false,
+      reason: "identity_mismatch",
+      message: "Account identity mismatch detected. Please log in again.",
+    };
+  }
+
+  const displayName =
+    dbUser.display_name && dbUser.display_name.trim().length > 0
+      ? dbUser.display_name.trim()
+      : dbUsername;
+
+  return {
+    ok: true,
+    userId: dbUser.id,
+    username: dbUsername,
+    displayName,
+  };
+}
+
 function cleanupClient(ws: WebSocket) {
   const session = clientSessions.get(ws);
   if (!session) return;
   const { roomId, peerId, userId, isAuthenticated, name } = session;
 
-  // Broadcast user_offline to all clients if authenticated
-  if (isAuthenticated && userId) {
+  clientSessions.delete(ws);
+
+  const otherAuthenticatedSessions = userId
+    ? Array.from(clientSessions.values()).filter(
+        (s) => s.userId === userId && s.isAuthenticated,
+      )
+    : [];
+  const hasOtherAuthenticatedSession = otherAuthenticatedSessions.length > 0;
+
+  // Release authoritative user room lock only for the owning websocket.
+  if (userId) {
+    const lock = activeUserRoomLocks.get(userId);
+    if (lock && lock.ws === ws) {
+      const replacement =
+        otherAuthenticatedSessions.find((s) => s.roomId === roomId) ||
+        otherAuthenticatedSessions[0];
+      if (replacement && replacement.roomId) {
+        activeUserRoomLocks.set(userId, {
+          roomId: replacement.roomId,
+          ws: replacement.ws,
+        });
+      } else {
+        activeUserRoomLocks.delete(userId);
+      }
+    }
+  }
+
+  // Broadcast user_offline only when the account has no remaining authenticated sockets.
+  if (isAuthenticated && userId && !hasOtherAuthenticatedSession) {
     broadcastToAll("user_offline", {
       user_id: userId,
       username: name,
@@ -90,7 +186,6 @@ function cleanupClient(ws: WebSocket) {
     logInfo(`Broadcasting user_offline for user ${userId}`);
   }
 
-  clientSessions.delete(ws);
   if (roomId && peerId !== null) {
     const room = roomManager.getRoom(roomId);
     if (room) {
@@ -102,10 +197,19 @@ function cleanupClient(ws: WebSocket) {
 
       // Remove player from session (decrements player count)
       if (userId) {
-        roomRepo.removePlayerSession(userId, roomId);
-        console.log(
-          `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`,
+        const hasOtherSameUserInRoom = otherAuthenticatedSessions.some(
+          (s) => s.roomId === roomId,
         );
+        if (!hasOtherSameUserInRoom) {
+          roomRepo.removePlayerSession(userId, roomId);
+          console.log(
+            `[WebSocket] 🚪 Player ${userId} disconnected from room ${roomId}`,
+          );
+        } else {
+          console.log(
+            `[WebSocket] 🔒 Preserving player session for user ${userId} in room ${roomId} (another authenticated socket is still active in-room)`,
+          );
+        }
       }
 
       // If the host left and there are still players, promote the next player
@@ -138,6 +242,7 @@ export function setupWebSocket(server: http.Server) {
       ws,
       peerId: null,
       roomId: null,
+      username: "",
       name: "",
       version: "",
       ip,
@@ -169,8 +274,9 @@ export function setupWebSocket(server: http.Server) {
             // Verify JWT token
             const user = verifyToken(token);
             if (user) {
+              let syncedUser = null;
               try {
-                userRepo.ensureExternalUser(
+                syncedUser = userRepo.ensureExternalUser(
                   user.userId,
                   user.username,
                   user.display_name,
@@ -182,11 +288,31 @@ export function setupWebSocket(server: http.Server) {
                 return send(ws, "error", { reason: "user_sync_failed" });
               }
 
+              if (!syncedUser || !syncedUser.is_active) {
+                return send(ws, "error", {
+                  reason: "invalid_user_profile",
+                  message: "Unable to load authenticated user profile",
+                });
+              }
+
+              // Reject any drift between token username and canonical DB profile for this user id.
+              if (syncedUser.username.trim() !== user.username.trim()) {
+                logError(
+                  `identity mismatch on handshake for userId=${user.userId}: tokenUsername=${user.username} dbUsername=${syncedUser.username}`,
+                );
+                return send(ws, "error", {
+                  reason: "identity_mismatch",
+                  message:
+                    "Account identity mismatch detected. Please log in again.",
+                });
+              }
+
               session.userId = user.userId;
               session.isAuthenticated = true;
-              session.name = user.display_name || user.username;
+              session.username = syncedUser.username;
+              session.name = syncedUser.display_name || syncedUser.username;
               logInfo(
-                `authenticated user: userId=${user.userId} username=${user.username}`,
+                `authenticated user: userId=${user.userId} username=${session.username}`,
               );
             } else {
               return send(ws, "error", { reason: "invalid_token" });
@@ -220,18 +346,43 @@ export function setupWebSocket(server: http.Server) {
 
         case "create_room": {
           // Require authentication for global mode
-          if (!session.isAuthenticated) {
-            return send(ws, "error", { reason: "authentication_required" });
+          const identity = validateSessionIdentity(session);
+          if (!identity.ok) {
+            return send(ws, "error", {
+              reason: identity.reason,
+              message: identity.message,
+            });
           }
 
           // For global mode, the room should already exist from HTTP POST
           // Check if user already has a room
-          const existingRoom = roomRepo.getPlayerCurrentRoom(session.userId!);
+          const existingRoom = roomRepo.getUserActiveRoomStrict(
+            identity.userId,
+          );
 
           if (!existingRoom) {
             return send(ws, "error", {
               reason: "no_room_found",
               message: "Room must be created via HTTP POST /api/rooms first",
+            });
+          }
+
+          const existingLock = activeUserRoomLocks.get(identity.userId);
+          if (existingLock && existingLock.ws !== ws) {
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: existingLock.roomId,
+              message:
+                "This account is already active in a room from another device/session. Leave that room first.",
+            });
+          }
+
+          if (session.roomId && session.roomId !== existingRoom.id) {
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: session.roomId,
+              message:
+                "This account is already active in another room. Leave it first before switching.",
             });
           }
 
@@ -244,22 +395,72 @@ export function setupWebSocket(server: http.Server) {
             room = roomManager.createRoomWithId(
               roomId,
               session.version,
-              session.name,
+              identity.displayName,
               ip,
             );
           }
 
-          // Host already added to player_sessions in HTTP POST
-          // Just update session and respond
+          // Ensure host is present in-memory for identity-based duplicate checks.
+          const existingHostMember = Array.from(room.clients.values()).find(
+            (client) => client.userId === identity.userId,
+          );
+          let hostPeerId = 1;
+          if (existingHostMember) {
+            hostPeerId = existingHostMember.peerId;
+            existingHostMember.isHost = true;
+            existingHostMember.name = identity.displayName;
+            existingHostMember.version = session.version;
+            room.hostPeerId = hostPeerId;
+          } else {
+            room.clients.set(1, {
+              peerId: 1,
+              userId: identity.userId,
+              name: identity.displayName,
+              version: session.version,
+              isHost: true,
+            });
+            room.hostPeerId = 1;
+            room.nextPeerId = Math.max(room.nextPeerId, 2);
+          }
+
+          // Persist host session so cross-device checks are DB-authoritative.
+          const hostSessionResult = roomRepo.addPlayerSession(
+            identity.userId,
+            roomId,
+          );
+          if (!hostSessionResult.ok) {
+            if (hostSessionResult.reason === "user_already_in_other_room") {
+              return send(ws, "error", {
+                reason: "user_already_in_room",
+                existingRoomId: hostSessionResult.existingRoomId,
+                message:
+                  "This account is already active in another room. Leave that room first before creating/confirming a room from this device.",
+              });
+            }
+
+            if (hostSessionResult.reason === "database_error") {
+              return send(ws, "error", {
+                reason: "player_session_error",
+                message:
+                  "Unable to confirm room host session right now. Please try again.",
+              });
+            }
+          }
+
+          // Host session is now persisted here (WebSocket confirmation).
+          // Update connection session and respond.
           console.log(
-            `[WebSocket] 👑 Host ${session.userId} confirming room ${roomId}`,
+            `[WebSocket] 👑 Host ${identity.userId} (${identity.username}) confirming room ${roomId}`,
           );
 
-          session.peerId = 1;
+          session.peerId = hostPeerId;
           session.roomId = roomId;
+          session.username = identity.username;
+          session.name = identity.displayName;
+          activeUserRoomLocks.set(identity.userId, { roomId, ws });
           send(ws, "room_created", {
             roomId: roomId,
-            peerId: 1,
+            peerId: hostPeerId,
             gamemode: existingRoom.gamemode,
             mapName: existingRoom.map_name,
           });
@@ -271,16 +472,18 @@ export function setupWebSocket(server: http.Server) {
 
         case "join_room": {
           // Require authentication for global mode
-          if (!session.isAuthenticated) {
-            console.log(`[WebSocket] ❌ join_room: User not authenticated`);
-            return send(ws, "error", { reason: "authentication_required" });
+          const identity = validateSessionIdentity(session);
+          if (!identity.ok) {
+            return send(ws, "error", {
+              reason: identity.reason,
+              message: identity.message,
+            });
           }
 
           if (
             !msg.data ||
             typeof (msg.data as any).roomId !== "string" ||
-            typeof (msg.data as any).version !== "string" ||
-            typeof (msg.data as any).name !== "string"
+            typeof (msg.data as any).version !== "string"
           ) {
             console.log(`[WebSocket] ❌ join_room: Invalid data format`);
             return send(ws, "error", { reason: "invalid_join_room" });
@@ -288,13 +491,74 @@ export function setupWebSocket(server: http.Server) {
 
           const roomId = (msg.data as any).roomId;
           const version = (msg.data as any).version;
-          const playerName = (msg.data as any).name;
+          const playerName = identity.displayName;
+          session.username = identity.username;
+          session.name = playerName;
+
+          // Acquire/refresh per-user lock BEFORE expensive join work to block cross-device races.
+          const existingLock = activeUserRoomLocks.get(identity.userId);
+          if (existingLock && existingLock.ws !== ws) {
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: existingLock.roomId,
+              message:
+                "This account is already active in a room from another device/session. Leave that room first.",
+            });
+          }
+          activeUserRoomLocks.set(identity.userId, { roomId, ws });
+          const releaseJoinLock = () => {
+            const lock = activeUserRoomLocks.get(identity.userId);
+            if (lock && lock.ws === ws && session.roomId !== lock.roomId) {
+              activeUserRoomLocks.delete(identity.userId);
+            }
+          };
+
+          // Authoritative identity check: block only if user is active in a DIFFERENT room.
+          const conflictingRoom = roomRepo.getUserConflictingActiveRoom(
+            identity.userId,
+            roomId,
+          );
+          if (conflictingRoom) {
+            releaseJoinLock();
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: conflictingRoom.id,
+              message:
+                "This account is already active in another room. Leave that room first before joining.",
+            });
+          }
+
+          // Security lock: one authenticated user can be in only one active room
+          // across all websocket sessions/devices.
+          if (session.roomId && session.roomId !== roomId) {
+            releaseJoinLock();
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: session.roomId,
+              message:
+                "This account is already active in another room. Leave it first before joining a different room.",
+            });
+          }
+
+          const otherSessionInRoom = Array.from(clientSessions.values()).find(
+            (s) =>
+              s.ws !== ws &&
+              s.userId === identity.userId &&
+              s.isAuthenticated &&
+              s.roomId !== null,
+          );
+          if (otherSessionInRoom) {
+            releaseJoinLock();
+            return send(ws, "error", {
+              reason: "user_already_in_room",
+              existingRoomId: otherSessionInRoom.roomId,
+              message:
+                "This account is already active in a room from another device/session. Leave that room first before joining.",
+            });
+          }
 
           console.log(
-            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`,
-          );
-          console.log(
-            `[WebSocket] 📥 join_room request: user=${session.userId} room=${roomId} name=${playerName}`,
+            `[WebSocket] 📥 join_room request: user=${identity.userId} username=${identity.username} room=${roomId} display=${playerName}`,
           );
 
           // Check if room exists in memory; if not, try to load from database
@@ -306,6 +570,7 @@ export function setupWebSocket(server: http.Server) {
               console.log(
                 `[WebSocket] ❌ join_room: Room ${roomId} not found in database`,
               );
+              releaseJoinLock();
               return send(ws, "error", { reason: "room_not_found" });
             }
             // Create room in memory with info from database
@@ -320,46 +585,93 @@ export function setupWebSocket(server: http.Server) {
             );
           }
 
-          const result = roomManager.joinRoom(roomId, version, playerName, ip);
+          const result = roomManager.joinRoom(
+            roomId,
+            version,
+            identity.userId,
+            playerName,
+            ip,
+          );
           if ("error" in result) {
             console.log(
               `[WebSocket] ❌ join_room: RoomManager error - ${result.error}`,
             );
+            releaseJoinLock();
             return send(ws, "error", { reason: result.error });
           }
           const { room: updatedRoom, peerId } = result;
-          session.peerId = peerId;
-          session.name = playerName;
-          session.version = version;
-          session.roomId = roomId;
 
           // Add player to room session (enforces single-room, increments player count)
-          const sessionAdded = roomRepo.addPlayerSession(
-            session.userId!,
+          const sessionResult = roomRepo.addPlayerSession(
+            identity.userId,
             roomId,
           );
-          if (!sessionAdded) {
-            console.log(
-              `[WebSocket] ⚠️  Player ${session.userId} already in room ${roomId}, sending existing session info`,
-            );
-            // Player already in room - just send them the room_joined confirmation again
-            const members = roomManager.getRoomMembers(roomId);
-            const dbRoom = roomRepo.getRoomById(roomId);
-            return send(ws, "room_joined", {
-              roomId: roomId,
-              peerId,
-              members: members.map((c) => ({
-                peerId: c.peerId,
-                name: c.name,
-                isHost: c.isHost,
-              })),
-              gamemode: dbRoom?.gamemode || "Deathmatch",
-              mapName: dbRoom?.map_name || "Frozen Field",
-              currentTbw: updatedRoom.currentTbw,
-            });
+          if (!sessionResult.ok) {
+            if (sessionResult.reason === "user_already_in_target_room") {
+              const existingRoomId = sessionResult.existingRoomId;
+              const otherLiveInRoomSession = Array.from(
+                clientSessions.values(),
+              ).find(
+                (s) =>
+                  s.ws !== ws &&
+                  s.userId === identity.userId &&
+                  s.isAuthenticated &&
+                  s.roomId === roomId,
+              );
+              if (otherLiveInRoomSession) {
+                // True concurrent session in the same room -> block.
+                roomManager.leaveRoom(roomId, peerId);
+                console.log(
+                  `[WebSocket] ⛔ Blocking concurrent same-room session for user ${identity.userId} in ${existingRoomId}`,
+                );
+                releaseJoinLock();
+                return send(ws, "error", {
+                  reason: "user_already_in_room",
+                  existingRoomId,
+                  message: `This account is already active in room ${existingRoomId}. Leave that room first before joining from another device.`,
+                });
+              }
+
+              // Idempotent reconnect: DB row already exists for this user+room, but no other live room session.
+              console.log(
+                `[WebSocket] 🔁 Allowing idempotent same-room reconnect for user ${identity.userId} in ${existingRoomId}`,
+              );
+            } else if (sessionResult.reason === "user_already_in_other_room") {
+              // Roll back in-memory room membership because user is active elsewhere.
+              roomManager.leaveRoom(roomId, peerId);
+              const existingRoomId = sessionResult.existingRoomId;
+              console.log(
+                `[WebSocket] ⛔ Blocking duplicate login for user ${identity.userId}; active in ${existingRoomId}`,
+              );
+              releaseJoinLock();
+              return send(ws, "error", {
+                reason: "user_already_in_room",
+                existingRoomId,
+                message: `This account is already active in another room (${existingRoomId}). Leave that room first before joining from another device.`,
+              });
+            } else {
+              // database_error
+              roomManager.leaveRoom(roomId, peerId);
+              releaseJoinLock();
+              return send(ws, "error", {
+                reason: "player_session_error",
+                message: "Unable to join room right now. Please try again.",
+              });
+            }
+
+            // For user_already_in_target_room reconnect path, continue and attach websocket session.
           }
+
+          // Commit websocket session state only after DB/session lock succeeds.
+          session.peerId = peerId;
+          session.name = playerName;
+          session.username = identity.username;
+          session.version = version;
+          session.roomId = roomId;
+          activeUserRoomLocks.set(identity.userId, { roomId, ws });
+
           console.log(
-            `[WebSocket] 🎮 Player ${session.userId} joined room ${roomId}`,
+            `[WebSocket] 🎮 Player ${identity.userId} (${identity.username}) joined room ${roomId}`,
           );
 
           // Check if room was empty and promote this player to host
@@ -369,7 +681,7 @@ export function setupWebSocket(server: http.Server) {
             const updatedMember = roomManager.getRoomMembers(roomId)[0];
             updatedMember.isHost = true;
             console.log(
-              `[WebSocket] 👑 Player ${session.userId} promoted to host (first member in empty room)`,
+              `[WebSocket] 👑 Player ${identity.userId} promoted to host (first member in empty room)`,
             );
           }
 

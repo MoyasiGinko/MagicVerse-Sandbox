@@ -60,6 +60,9 @@ func _ready() -> void:
 	if backend and backend.has_signal("room_created"):
 		backend.room_created.connect(_on_backend_room_created)
 		print("[RoomCreation] Backend room_created signal connected")
+	if backend and backend.has_signal("room_create_failed"):
+		backend.room_create_failed.connect(_on_backend_room_create_failed)
+		print("[RoomCreation] Backend room_create_failed signal connected")
 
 	# Setup HTTP request for worlds
 	_http_worlds = HTTPRequest.new()
@@ -211,6 +214,12 @@ func _on_backend_room_created(room_id: String, room_data: Dictionary) -> void:
 	room_created.emit(room_id, room_data)
 	await get_tree().create_timer(1.0).timeout
 	hide_dialog()
+
+func _on_backend_room_create_failed(message: String) -> void:
+	is_creating = false
+	create_button.disabled = false
+	status_label.text = message
+	print("[RoomCreation] ❌ Room creation failed: ", message)
 
 func _on_cancel_pressed() -> void:
 	"""Handle cancel button press"""

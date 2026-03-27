@@ -31,6 +31,7 @@ var game_servers_request: HTTPRequest
 var game_server_dialog: AcceptDialog
 var game_server_status_label: Label
 var game_server_list_container: VBoxContainer
+var _global_join_in_progress: bool = false
 var _last_display_name: String = ""
 
 func _ready() -> void:
@@ -199,6 +200,11 @@ func _commit_display_name(raw_text: String) -> void:
 	# Update global state immediately for UI, backend will persist
 	Global.player_display_name = trimmed
 	Global.display_name = trimmed
+
+	if Global.is_authenticated and Global.auth_token != "" and auth_manager:
+		auth_manager.update_display_name(trimmed)
+	else:
+		print("[Menu] Skipping backend display name update (not authenticated)")
 
 # ===== GLOBAL PLAY MENU FUNCTIONS =====
 
@@ -402,6 +408,10 @@ func _on_global_join_pressed() -> void:
 
 func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	"""Handle room selection from GlobalServerList"""
+	if _global_join_in_progress:
+		print("[Menu] ⏳ Join already in progress, ignoring duplicate room selection")
+		return
+
 	print("[Menu] === ROOM SELECTED FROM SERVER LIST ===")
 	print("[Menu] 🎯 Room ID: ", room_id)
 	print("[Menu] 📋 Room data: ", room_data)
@@ -424,6 +434,7 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	# Set play mode to global and backend to node
 	main.play_mode = "global"
 	main.backend = "node"
+	_global_join_in_progress = true
 
 	# Extract map and gamemode from room data
 	var map_name: String = str(room_data.get("map_name", ""))
@@ -432,7 +443,11 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 
 	# Connect to WebSocket and join the room using proper MultiplayerPeerExtension
 	print("[Menu] ✅ Calling _setup_websocket_client() with room_id: ", room_id)
-	main._setup_websocket_client(room_id)
+	await main._setup_websocket_client(room_id)
+
+	# If still in menu scene, allow retries after prior attempt completes.
+	if is_inside_tree():
+		_global_join_in_progress = false
 
 func show_hide(a: String, b: String) -> void:
 	"""Show menu A and hide menu B"""

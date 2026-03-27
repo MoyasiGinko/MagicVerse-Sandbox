@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 export interface RoomClient {
   peerId: number;
+  userId: number;
   name: string;
   version: string;
   isHost: boolean;
@@ -24,7 +25,17 @@ export class RoomManager {
     this.rooms = new Map();
   }
 
-  createRoom(version: string, hostName: string, hostIp: string): GameRoom {
+  createRoom(
+    version: string,
+    hostName: string,
+    hostUserIdOrIp: number | string,
+    hostIpMaybe?: string,
+  ): GameRoom {
+    const hostUserId = typeof hostUserIdOrIp === "number" ? hostUserIdOrIp : -1;
+    const hostIp =
+      typeof hostUserIdOrIp === "string"
+        ? hostUserIdOrIp
+        : (hostIpMaybe ?? "unknown");
     const roomId = nanoid(6);
     const room: GameRoom = {
       id: roomId,
@@ -37,6 +48,7 @@ export class RoomManager {
     };
     room.clients.set(1, {
       peerId: 1,
+      userId: hostUserId,
       name: hostName,
       version,
       isHost: true,
@@ -49,7 +61,7 @@ export class RoomManager {
     roomId: string,
     version: string,
     hostName: string,
-    hostIp: string
+    hostIp: string,
   ): GameRoom {
     const room: GameRoom = {
       id: roomId,
@@ -76,21 +88,42 @@ export class RoomManager {
   joinRoom(
     roomId: string,
     version: string,
-    playerName: string,
-    clientIp: string
+    userIdOrName: number | string,
+    playerNameOrIp: string,
+    clientIpMaybe?: string,
   ): { room: GameRoom; peerId: number } | { error: string } {
+    const userId = typeof userIdOrName === "number" ? userIdOrName : -1;
+    const playerName =
+      typeof userIdOrName === "number" ? playerNameOrIp : userIdOrName;
+    const clientIp =
+      typeof userIdOrName === "number"
+        ? (clientIpMaybe ?? "unknown")
+        : playerNameOrIp;
     const room = this.rooms.get(roomId);
     if (!room) return { error: "room_not_found" };
     if (room.version !== version) return { error: "version_mismatch" };
     if (room.bannedIps.has(clientIp)) return { error: "banned" };
-    for (const client of room.clients.values()) {
-      if (client.name.toLowerCase() === playerName.toLowerCase()) {
-        return { error: "name_taken" };
+
+    // Security-critical: uniqueness must be based on immutable user identity.
+    if (userId > 0) {
+      for (const client of room.clients.values()) {
+        if (client.userId === userId) {
+          return { error: "user_already_in_room" };
+        }
+      }
+    } else {
+      // Backward compatibility for non-auth/test callers.
+      for (const client of room.clients.values()) {
+        if (client.name.toLowerCase() === playerName.toLowerCase()) {
+          return { error: "name_taken" };
+        }
       }
     }
+
     const peerId = room.nextPeerId++;
     room.clients.set(peerId, {
       peerId,
+      userId,
       name: playerName,
       version,
       isHost: false,

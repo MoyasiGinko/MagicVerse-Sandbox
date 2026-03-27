@@ -3,6 +3,7 @@ class_name GlobalPlayMenuBackend
 
 signal rooms_fetched(rooms: Array)
 signal room_created(room_id: String, room_data: Dictionary)
+signal room_create_failed(message: String)
 
 @export var base_api_url: String = ""
 var _http_rooms: HTTPRequest
@@ -69,16 +70,26 @@ func _on_rooms_response(result: int, response_code: int, headers: PackedStringAr
 func _on_create_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	print("[GlobalPMBackend] 📥 Create response:", response_code, " result:", result)
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
-		print("[GlobalPMBackend] ❌ HTTP error: response_code=", response_code, " result=", result)
+		var message := "Failed to create room"
+		var error_text: String = body.get_string_from_utf8()
+		var parsed := JSON.new()
+		if parsed.parse(error_text) == OK and parsed.data is Dictionary:
+			var data_dict: Dictionary = parsed.data as Dictionary
+			if data_dict.has("error"):
+				message = str(data_dict.get("error", message))
+		print("[GlobalPMBackend] ❌ HTTP error: response_code=", response_code, " result=", result, " message=", message)
+		room_create_failed.emit(message)
 		return
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
 		print("[GlobalPMBackend] ❌ Failed to parse JSON response")
+		room_create_failed.emit("Failed to parse server response")
 		return
 	var data := json.data as Dictionary
 	if not data.get("success", false):
 		print("[GlobalPMBackend] ❌ Server responded with success=false")
+		room_create_failed.emit(str(data.get("error", "Room creation failed")))
 		return
 	var room: Dictionary = data.get("room", {}) as Dictionary
 	var room_id: String = str(room.get("id", ""))

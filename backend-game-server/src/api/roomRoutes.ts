@@ -1,10 +1,12 @@
 import { Router, Request, Response } from "express";
 import { RoomRepository } from "../database/repositories/roomRepository";
+import { UserRepository } from "../database/repositories/userRepository";
 import { authenticateToken, AuthRequest } from "../auth/middleware";
 import { notifyAllClientsRoomsChanged } from "../networking/websocket";
 
 const router = Router();
 const roomRepo = new RoomRepository();
+const userRepo = new UserRepository();
 
 // Create a new room (requires authentication)
 router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
@@ -19,13 +21,13 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       "[RoomAPI] 📋 Room Config - Gamemode: ",
       gamemode,
       " Map: ",
-      mapName
+      mapName,
     );
     console.log(
       "[RoomAPI] 👥 Max Players: ",
       maxPlayers,
       " Public: ",
-      isPublic
+      isPublic,
     );
 
     // Validate required fields
@@ -41,16 +43,40 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       return;
     }
 
+    const dbUser = userRepo.getUserById(userId);
+    if (!dbUser || !dbUser.is_active) {
+      console.log(
+        "[RoomAPI] ❌ Validation failed: invalid/inactive user profile",
+      );
+      res.status(403).json({ error: "Invalid user profile" });
+      return;
+    }
+
+    if (dbUser.username.trim() !== username.trim()) {
+      console.log(
+        "[RoomAPI] ❌ Validation failed: identity mismatch userId=",
+        userId,
+        " tokenUsername=",
+        username,
+        " dbUsername=",
+        dbUser.username,
+      );
+      res.status(403).json({
+        error: "Account identity mismatch detected. Please log in again.",
+      });
+      return;
+    }
+
     // Check if user already has an active room
-    const existingRoom = roomRepo.getPlayerCurrentRoom(userId);
+    const existingRoom = roomRepo.getUserActiveRoomStrict(userId);
     if (existingRoom) {
       console.log(
         "[RoomAPI] ❌ User already has active room:",
-        existingRoom.id
+        existingRoom.id,
       );
       res.status(400).json({
         error:
-          "You already have an active room. Leave it before creating a new one.",
+          "You are already active in a room. Leave that room first before creating another.",
         existing_room_id: existingRoom.id,
       });
       return;
@@ -74,7 +100,7 @@ router.post("/", authenticateToken, (req: AuthRequest, res: Response) => {
       isPublic: isPublic !== false,
     });
     console.log(
-      "[RoomAPI] ✅ Room created successfully (current_players=0, awaiting WebSocket join)"
+      "[RoomAPI] ✅ Room created successfully (current_players=0, awaiting WebSocket join)",
     );
 
     // Don't add host to player_sessions here - they'll be added when they

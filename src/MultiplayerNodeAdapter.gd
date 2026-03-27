@@ -238,8 +238,32 @@ func _handle_sync(data: Dictionary) -> void:
 	pass
 
 func _handle_error(data: Dictionary) -> void:
-	var code: String = data.get("code", "")
-	var message: String = data.get("message", "Unknown error")
+	var reason: String = str(data.get("reason", ""))
+	var message: String = str(data.get("message", ""))
+
+	if message == "":
+		match reason:
+			"user_already_in_room":
+				var existing_room_id := str(data.get("existingRoomId", ""))
+				message = "This account is already active in another room"
+				if existing_room_id != "":
+					message += " (" + existing_room_id + ")"
+				message += ". Leave that room first before joining from another device."
+			"authentication_required":
+				message = "Authentication required. Please log in again."
+			"identity_mismatch":
+				message = "Account identity mismatch detected. Please sign out and log in again."
+			"invalid_user_profile":
+				message = "User profile is invalid or inactive. Please log in again."
+			"room_not_found":
+				message = "Room not found or no longer active."
+			"version_mismatch":
+				message = "Version mismatch. Update game/client and try again."
+			"name_taken":
+				message = "Display name is already in use in this room."
+			_:
+				message = "Network request failed. Please try again."
+
 	push_error("Backend error: " + message)
 	UIHandler.show_alert(message, 8, false, UIHandler.alert_colour_error)
 	connection_failed.emit(message)
@@ -290,14 +314,19 @@ func join_room(room_id: String, version: String, player_name: String) -> void:
 	print("[NodeAdapter]   - WebSocket state: ", ws.get_ready_state() if ws else "NULL")
 	print("[NodeAdapter]   - _is_connected: ", _is_connected)
 
+	if Global.auth_token == "":
+		var auth_message := "Authentication required. Please log in again."
+		print("[NodeAdapter] ❌ ", auth_message)
+		connection_failed.emit(auth_message)
+		return
+
 	if not ws or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		print("[NodeAdapter] ❌ ERROR: WebSocket not connected! Cannot send join_room")
 		return
 
 	var payload: Dictionary = {
 		"roomId": room_id,
-		"version": version,
-		"name": player_name
+		"version": version
 	}
 	print("[NodeAdapter] 📤 Sending join_room with payload: ", payload)
 	_send_message("join_room", payload)

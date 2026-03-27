@@ -4,6 +4,7 @@
   "description": "A backend game server for Tinybox, implementing ENet and WebSocket protocols.",
   "main": "src/server.ts",
   "scripts": {
+    "prestart": "node scripts/ensure-port-free.js",
     "start": "ts-node src/server.ts",
     "build": "tsc",
     "test": "jest",

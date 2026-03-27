@@ -22,7 +22,7 @@ export function runMigrations(): void {
   // Ensure display_name column exists for older databases
   const columns = db.prepare("PRAGMA table_info(users)").all();
   const hasDisplayName = columns.some(
-    (col: any) => col.name === "display_name"
+    (col: any) => col.name === "display_name",
   );
   if (!hasDisplayName) {
     db.exec(`
@@ -75,7 +75,7 @@ export function runMigrations(): void {
   // Add inactive_since column to existing rooms table
   const roomColumns = db.prepare("PRAGMA table_info(rooms)").all();
   const hasInactiveSince = roomColumns.some(
-    (col: any) => col.name === "inactive_since"
+    (col: any) => col.name === "inactive_since",
   );
   if (!hasInactiveSince) {
     db.exec(`
@@ -96,6 +96,20 @@ export function runMigrations(): void {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
         )
+    `);
+
+  // Keep only the newest session row per user, then enforce one active room per user.
+  db.exec(`
+      DELETE FROM player_sessions
+      WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM player_sessions
+        GROUP BY user_id
+      )
+    `);
+  db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_player_sessions_unique_user
+      ON player_sessions(user_id)
     `);
 
   // Match history table

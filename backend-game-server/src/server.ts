@@ -40,8 +40,34 @@ app.get("/health", (_req: Request, res: Response) => {
 // Setup WebSocket
 setupWebSocket(server);
 
+// One-time startup hygiene for lingering active rooms with no players.
+const markedStartup = roomRepo.deactivateStaleEmptyActiveRooms(1);
+if (markedStartup > 0) {
+  console.log(
+    `🧹 Startup marked ${markedStartup} stale empty active room(s) inactive`,
+  );
+}
+
+server.on("error", (error: NodeJS.ErrnoException) => {
+  const code = error.code || "UNKNOWN";
+  console.error(`❌ Server failed to start (${code}): ${error.message}`);
+  if (code === "EADDRINUSE") {
+    console.error(
+      `❌ Port ${config.port} is already in use. Stop the old backend process before starting a new one.`,
+    );
+  }
+  process.exit(1);
+});
+
 // Periodic cleanup of inactive rooms (every 30 seconds, delete rooms inactive for 1+ minute)
 setInterval(() => {
+  const markedInactive = roomRepo.deactivateStaleEmptyActiveRooms(1);
+  if (markedInactive > 0) {
+    console.log(
+      `🧹 Marked ${markedInactive} stale empty active room(s) inactive`,
+    );
+  }
+
   const cleaned = roomRepo.cleanupInactiveRooms(1);
   if (cleaned > 0) {
     console.log(`🗑️  Cleaned up ${cleaned} inactive room(s)`);
@@ -69,7 +95,7 @@ function collectRegistryStats(): {
 
 server.listen(config.port, () => {
   // eslint-disable-next-line no-console
-  console.log(`Server is running on port ${config.port}`);
+  console.log(`Server is running on port ${config.port} (pid=${process.pid})`);
   console.log(`API endpoints available:`);
   console.log(`  - POST /api/auth/register`);
   console.log(`  - POST /api/auth/login`);

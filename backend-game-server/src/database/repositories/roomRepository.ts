@@ -25,6 +25,19 @@ export interface CreateRoomInput {
   isPublic?: boolean;
 }
 
+export type AddPlayerSessionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "user_already_in_target_room" | "user_already_in_other_room";
+      existingRoomId: string;
+    }
+  | {
+      ok: false;
+      reason: "database_error";
+      existingRoomId?: undefined;
+    };
+
 export class RoomRepository {
   private db = getDatabase();
 
@@ -41,7 +54,7 @@ export class RoomRepository {
       input.gamemode,
       input.mapName || null,
       input.maxPlayers || 8,
-      input.isPublic !== false ? 1 : 0
+      input.isPublic !== false ? 1 : 0,
     );
 
     return this.getRoomById(input.id)!;
@@ -110,7 +123,26 @@ export class RoomRepository {
     const result = stmt.run(olderThanMinutes);
     if (result.changes > 0) {
       console.log(
-        `[RoomRepo] 🧹 Cleaned up ${result.changes} inactive room(s) older than ${olderThanMinutes} minute(s)`
+        `[RoomRepo] 🧹 Cleaned up ${result.changes} inactive room(s) older than ${olderThanMinutes} minute(s)`,
+      );
+    }
+    return result.changes;
+  }
+
+  // Mark stale active rooms with zero players as inactive so they can be cleaned up.
+  deactivateStaleEmptyActiveRooms(olderThanMinutes: number = 1): number {
+    const stmt = this.db.prepare(`
+      UPDATE rooms
+      SET is_active = 0,
+          inactive_since = COALESCE(inactive_since, CURRENT_TIMESTAMP)
+      WHERE is_active = 1
+        AND current_players <= 0
+        AND datetime(created_at) < datetime('now', '-' || ? || ' minutes')
+    `);
+    const result = stmt.run(olderThanMinutes);
+    if (result.changes > 0) {
+      console.log(
+        `[RoomRepo] 💤 Marked ${result.changes} stale empty active room(s) inactive`,
       );
     }
     return result.changes;
@@ -130,24 +162,28 @@ export class RoomRepository {
   }
 
   // Add player to room session (WebSocket join)
-  addPlayerSession(userId: number, roomId: string): boolean {
+  addPlayerSession(userId: number, roomId: string): AddPlayerSessionResult {
     try {
       // Check if player is already in this exact room
       const checkStmt = this.db.prepare(
-        "SELECT COUNT(*) as count FROM player_sessions WHERE user_id = ? AND room_id = ?"
+        "SELECT COUNT(*) as count FROM player_sessions WHERE user_id = ? AND room_id = ?",
       );
       const existing = checkStmt.get(userId, roomId) as { count: number };
 
       if (existing.count > 0) {
         console.log(
-          `[RoomRepo] ⚠️  Player ${userId} already in room ${roomId}, skipping duplicate`
+          `[RoomRepo] ⛔ Player ${userId} already active in target room ${roomId}`,
         );
-        return false; // Already in this room, don't increment again
+        return {
+          ok: false,
+          reason: "user_already_in_target_room",
+          existingRoomId: roomId,
+        };
       }
 
-      // Check if player is in a different room (for logging)
+      // If the user is active in any other room, block this join.
       const checkOtherStmt = this.db.prepare(
-        "SELECT room_id FROM player_sessions WHERE user_id = ?"
+        "SELECT room_id FROM player_sessions WHERE user_id = ?",
       );
       const otherRoom = checkOtherStmt.get(userId) as
         | { room_id: string }
@@ -155,23 +191,13 @@ export class RoomRepository {
 
       if (otherRoom) {
         console.log(
-          `[RoomRepo] 🔄 Player ${userId} leaving room ${otherRoom.room_id}...`
+          `[RoomRepo] ⛔ Player ${userId} already active in room ${otherRoom.room_id}; blocking join to ${roomId}`,
         );
-        // Remove player from other room first (enforces single-room)
-        const stmt_remove = this.db.prepare(
-          "DELETE FROM player_sessions WHERE user_id = ?"
-        );
-        stmt_remove.run(userId);
-
-        // Decrement the old room's count
-        const oldRoom = this.getRoomById(otherRoom.room_id);
-        if (oldRoom) {
-          const oldCount = Math.max(0, oldRoom.current_players - 1);
-          this.updatePlayerCount(otherRoom.room_id, oldCount);
-          console.log(
-            `[RoomRepo] 👥 Room ${otherRoom.room_id} player count: ${oldRoom.current_players} -> ${oldCount}`
-          );
-        }
+        return {
+          ok: false,
+          reason: "user_already_in_other_room",
+          existingRoomId: otherRoom.room_id,
+        };
       }
 
       // Add to new room
@@ -185,18 +211,32 @@ export class RoomRepository {
       // Update room player count based on actual player_sessions count
       // (not the stale count from the room record)
       const countStmt = this.db.prepare(
-        "SELECT COUNT(*) as count FROM player_sessions WHERE room_id = ?"
+        "SELECT COUNT(*) as count FROM player_sessions WHERE room_id = ?",
       );
       const countResult = countStmt.get(roomId) as { count: number };
       const actualCount = countResult.count;
       this.updatePlayerCount(roomId, actualCount);
       console.log(
-        `[RoomRepo] 👥 Room ${roomId} updated to actual player count: ${actualCount}`
+        `[RoomRepo] 👥 Room ${roomId} updated to actual player count: ${actualCount}`,
       );
-      return true;
+      return { ok: true };
     } catch (error) {
       console.error(`[RoomRepo] ❌ Error adding player session:`, error);
-      return false;
+
+      // Handle uniqueness races deterministically (same user already has active session).
+      const existingRoom = this.getPlayerCurrentRoom(userId);
+      if (existingRoom) {
+        return {
+          ok: false,
+          reason:
+            existingRoom.id === roomId
+              ? "user_already_in_target_room"
+              : "user_already_in_other_room",
+          existingRoomId: existingRoom.id,
+        };
+      }
+
+      return { ok: false, reason: "database_error" };
     }
   }
 
@@ -204,7 +244,7 @@ export class RoomRepository {
   removePlayerSession(userId: number, roomId: string): boolean {
     try {
       const stmt = this.db.prepare(
-        "DELETE FROM player_sessions WHERE user_id = ? AND room_id = ?"
+        "DELETE FROM player_sessions WHERE user_id = ? AND room_id = ?",
       );
       stmt.run(userId, roomId);
       console.log(`[RoomRepo] ❌ Player ${userId} removed from room ${roomId}`);
@@ -215,7 +255,7 @@ export class RoomRepository {
         const newCount = Math.max(0, room.current_players - 1);
         this.updatePlayerCount(roomId, newCount);
         console.log(
-          `[RoomRepo] 👥 Room ${roomId} player count: ${room.current_players} -> ${newCount}`
+          `[RoomRepo] 👥 Room ${roomId} player count: ${room.current_players} -> ${newCount}`,
         );
 
         // Deactivate if empty
@@ -240,7 +280,7 @@ export class RoomRepository {
       const result = stmt.get(userId) as Room | null;
       if (result) {
         console.log(
-          `[RoomRepo] 🎯 Player ${userId} has active room: ${result.id}`
+          `[RoomRepo] 🎯 Player ${userId} has active room: ${result.id}`,
         );
       } else {
         console.log(`[RoomRepo] ✅ Player ${userId} has no active room`);
@@ -248,6 +288,67 @@ export class RoomRepository {
       return result;
     } catch (error) {
       console.error(`[RoomRepo] ❌ Error getting player current room:`, error);
+      return null;
+    }
+  }
+
+  // Strict active-room lookup by immutable identity.
+  // Returns an active room if user is either host OR has a player session.
+  getUserActiveRoomStrict(userId: number): Room | null {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT DISTINCT r.*
+        FROM rooms r
+        LEFT JOIN player_sessions ps
+          ON ps.room_id = r.id AND ps.user_id = ?
+        WHERE r.is_active = 1
+          AND (r.host_user_id = ? OR ps.user_id IS NOT NULL)
+        ORDER BY r.created_at DESC
+        LIMIT 1
+      `);
+      const result = stmt.get(userId, userId) as Room | null;
+      if (result) {
+        console.log(
+          `[RoomRepo] 🔒 Strict active room for user ${userId}: ${result.id}`,
+        );
+      }
+      return result;
+    } catch (error) {
+      console.error(`[RoomRepo] ❌ Error getting strict active room:`, error);
+      return null;
+    }
+  }
+
+  // Returns any active room for this user that is NOT the provided target room.
+  // Used by join flow to avoid false positives when the user is joining their own newly-created room.
+  getUserConflictingActiveRoom(
+    userId: number,
+    targetRoomId: string,
+  ): Room | null {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT DISTINCT r.*
+        FROM rooms r
+        LEFT JOIN player_sessions ps
+          ON ps.room_id = r.id AND ps.user_id = ?
+        WHERE r.is_active = 1
+          AND (r.host_user_id = ? OR ps.user_id IS NOT NULL)
+          AND r.id != ?
+        ORDER BY r.created_at DESC, r.id DESC
+        LIMIT 1
+      `);
+      const result = stmt.get(userId, userId, targetRoomId) as Room | null;
+      if (result) {
+        console.log(
+          `[RoomRepo] ⛔ Conflicting active room for user ${userId}: ${result.id} (target=${targetRoomId})`,
+        );
+      }
+      return result;
+    } catch (error) {
+      console.error(
+        `[RoomRepo] ❌ Error getting conflicting active room:`,
+        error,
+      );
       return null;
     }
   }
