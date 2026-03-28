@@ -46,6 +46,11 @@ backend-game-server
    ```
    npm install
    ```
+4. Configure environment variables:
+   ```
+   cp .env.example .env
+   ```
+   Update secrets and URLs in `.env` before running in shared or production environments.
 
 ## Usage
 

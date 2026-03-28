@@ -16,23 +16,16 @@ interface RegistryPayload {
   build_version: string;
 }
 
-const REGISTRY_BASE_URL = (
-  process.env.DJANGO_REGISTRY_BASE_URL || "http://localhost:8000/api"
-).replace(/\/+$/, "");
+const REGISTRY_BASE_URL = config.djangoRegistryBaseUrl.replace(/\/+$/, "");
 
-const SERVER_ID =
-  process.env.GAME_SERVER_ID || `node-${config.port.toString()}`;
-const SERVER_NAME =
-  process.env.GAME_SERVER_NAME || `Node Server ${config.port}`;
-const SERVER_REGION = process.env.GAME_SERVER_REGION || "global";
-const SERVER_PUBLIC =
-  (process.env.GAME_SERVER_PUBLIC || "true").toLowerCase() !== "false";
-const SERVER_BUILD = process.env.GAME_SERVER_BUILD || "";
+const SERVER_ID = config.gameServerId;
+const SERVER_NAME = config.gameServerName;
+const SERVER_REGION = config.gameServerRegion;
+const SERVER_PUBLIC = config.gameServerPublic;
+const SERVER_BUILD = config.gameServerBuild;
 
-const PUBLIC_API_URL =
-  process.env.PUBLIC_API_URL || `http://localhost:${config.port}/api`;
-const PUBLIC_WS_URL =
-  process.env.PUBLIC_WS_URL || `ws://localhost:${config.port}`;
+const PUBLIC_API_URL = config.publicApiUrl;
+const PUBLIC_WS_URL = config.publicWsUrl;
 
 function requestJson(url: string, payload: object): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -22,17 +22,17 @@ func _ready() -> void:
 	add_child(req)
 	req.request_completed.connect(_on_request_completed)
 	# Points to the latest official release.
-	req.request("https://api.github.com/repos/caelan-douglas/tinybox/releases/latest")
+	req.request(BackendConfig.get_update_release_api_url())
 	pressed.connect(_on_pressed)
 
 func _on_pressed() -> void:
 	# Points to the official repo.
-	OS.shell_open("https://github.com/caelan-douglas/tinybox/releases/latest")
+	OS.shell_open(BackendConfig.get_update_release_page_url())
 
 func _on_request_completed(result : int, response_code : int, headers : PackedStringArray, body : PackedByteArray) -> void:
 	var json : Variant = JSON.parse_string(body.get_string_from_utf8())
 	if json == null: return
-	
+
 	if json.has("name"):
 		# if we are not running latest version
 		if str(json["name"]) != get_tree().current_scene.display_version:

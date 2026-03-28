@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
+import { config } from "../config";
 
-const JWT_SECRET: string =
-  process.env.JWT_SECRET || "your-super-secret-key-change-in-production";
+const JWT_SECRET: string = config.jwtSecret;
 const JWT_EXPIRATION = "7d";
 
 export interface TokenPayload {

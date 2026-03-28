@@ -20,8 +20,8 @@ func _ready() -> void:
 	var req : HTTPRequest = HTTPRequest.new()
 	add_child(req)
 	req.request_completed.connect(_on_request_completed)
-	# Points to the repo server list.
-	req.request("https://raw.githubusercontent.com/MoyasiGinko/godot-world-release/refs/heads/main/server_list.json")
+	# Points to the runtime-configured legacy server list URL.
+	req.request(BackendConfig.get_legacy_server_list_url())
 
 func _on_request_completed(result : int, response_code : int, headers : PackedStringArray, body : PackedByteArray) -> void:
 	var json : Variant = JSON.parse_string(body.get_string_from_utf8())
@@ -35,7 +35,7 @@ func add_server(server_info : Dictionary) -> void:
 	var s_name : String = server_info["name"]
 	var s_address : String = server_info["address"]
 	var s_hosts : String = server_info["hosted_by"]
-	
+
 	var server_list_entry_i : ServerListEntry = server_list_entry.instantiate()
 	var list : VBoxContainer = $ScrollContainer/List
 	list.add_child(server_list_entry_i)

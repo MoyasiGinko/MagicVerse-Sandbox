@@ -17,6 +17,7 @@ enum RequestType {
 # Backend URL
 var backend_url := BackendConfig.get_django_base_url()
 var http_request: HTTPRequest = null
+var config_request: HTTPRequest = null
 var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
 var current_request_type: RequestType = RequestType.NONE
 
@@ -26,6 +27,7 @@ const TOKEN_SAVE_PATH := "user://tinybox_token.json"
 func _ready() -> void:
 	backend_url = BackendConfig.get_django_base_url()
 	_ensure_runtime_dependencies()
+	_fetch_dynamic_client_config()
 
 func _ensure_runtime_dependencies() -> void:
 	# Create HTTPRequest node for making requests
@@ -35,9 +37,47 @@ func _ensure_runtime_dependencies() -> void:
 	if not http_request.request_completed.is_connected(_on_http_request_completed):
 		http_request.request_completed.connect(_on_http_request_completed)
 
+	if config_request == null:
+		config_request = HTTPRequest.new()
+		add_child(config_request)
+	if not config_request.request_completed.is_connected(_on_client_config_request_completed):
+		config_request.request_completed.connect(_on_client_config_request_completed)
+
 	# Get reference to WebSocket Manager
 	if ws_manager == null:
 		ws_manager = get_node_or_null("/root/WSManager") as GlobalWebSocketManager
+
+func _fetch_dynamic_client_config() -> void:
+	if config_request == null:
+		return
+	var url: String = BackendConfig.get_client_config_url()
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"User-Agent: Godot/4.0 (Tinybox)"
+	])
+	var err: int = config_request.request(url, headers, HTTPClient.METHOD_GET)
+	if err != OK:
+		print("[AuthMgr] Failed to request dynamic client config: ", err)
+
+func _on_client_config_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		return
+	if response_code < 200 or response_code >= 300:
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	var parsed: Variant = JSON.parse_string(response_text)
+	if not (parsed is Dictionary):
+		return
+
+	var payload: Dictionary = parsed as Dictionary
+	if not payload.get("success", false):
+		return
+
+	if payload.has("config") and payload.get("config") is Dictionary:
+		BackendConfig.apply_client_config(payload.get("config") as Dictionary)
+		backend_url = BackendConfig.get_django_base_url()
+		print("[AuthMgr] Applied dynamic client config from server")
 
 ## Register a new user
 func register_user(username: String, email: String, password: String) -> void:
