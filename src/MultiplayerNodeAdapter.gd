@@ -6,6 +6,8 @@ class_name MultiplayerNodeAdapter
 signal room_created(room_id: String)
 signal room_joined(peer_id: int, room_id: String)
 signal connection_failed(reason: String)
+signal backend_connected
+signal handshake_accepted
 signal rooms_list_changed  # New signal for room list changes
 signal peer_connected(peer_id: int)  # For multiplayer system integration
 signal peer_disconnected(peer_id: int)  # For multiplayer system integration
@@ -17,6 +19,7 @@ var _peer_id: int = 0
 var _room_id: String = ""
 var _connected_peers: PackedInt32Array = []
 var _is_connected: bool = false
+var _handshake_accepted: bool = false
 var _is_server: bool = false  # Will be true if this peer is the host
 var _pending_members: Array = []  # Store members received before World is ready
 var room_members: Array = []  # Public accessor for room member list
@@ -31,6 +34,7 @@ func connect_to_server(url: String) -> bool:
 		push_error("Failed to connect to Node backend: " + str(err))
 		return false
 	_is_connected = false
+	_handshake_accepted = false
 	return true
 
 func _process(_delta: float) -> void:
@@ -43,6 +47,7 @@ func _process(_delta: float) -> void:
 	if state == WebSocketPeer.STATE_OPEN:
 		if not _is_connected:
 			_is_connected = true
+			backend_connected.emit()
 
 		while ws.get_available_packet_count() > 0:
 			_on_ws_message()
@@ -97,6 +102,8 @@ func _on_ws_message() -> void:
 			push_warning("Unknown message type: " + str(msg_type))
 
 func _handle_handshake_accepted(data: Dictionary) -> void:
+	_handshake_accepted = true
+	handshake_accepted.emit()
 	print("[NodeAdapter] ✅ Handshake accepted")
 
 func _handle_room_created(data: Dictionary) -> void:
@@ -375,6 +382,7 @@ func close() -> void:
 	if ws:
 		ws.close()
 	_is_connected = false
+	_handshake_accepted = false
 	_is_server = false
 	_room_id = ""
 	_peer_id = 0
@@ -390,6 +398,25 @@ func get_room_id() -> String:
 
 func is_backend_connected() -> bool:
 	return _is_connected and ws != null and ws.get_ready_state() == WebSocketPeer.STATE_OPEN
+
+func is_handshake_accepted() -> bool:
+	return _handshake_accepted
+
+func wait_for_backend_connection(timeout_seconds: float = 5.0) -> bool:
+	var deadline_ms: int = Time.get_ticks_msec() + int(timeout_seconds * 1000.0)
+	while Time.get_ticks_msec() < deadline_ms:
+		if is_backend_connected():
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return false
+
+func wait_for_handshake(timeout_seconds: float = 5.0) -> bool:
+	var deadline_ms: int = Time.get_ticks_msec() + int(timeout_seconds * 1000.0)
+	while Time.get_ticks_msec() < deadline_ms:
+		if _handshake_accepted:
+			return true
+		await get_tree().create_timer(0.05).timeout
+	return false
 
 func spawn_pending_members() -> void:
 	"""Spawn all pending members after World is ready"""

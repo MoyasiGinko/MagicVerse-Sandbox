@@ -908,12 +908,18 @@ func _setup_websocket_host(room_id: String = "", map_name: String = "Frozen Fiel
 
 	# Wait for WebSocket connection
 	print("[Main] ⏳ Waiting for connection...")
-	await get_tree().create_timer(0.5).timeout
+	if not await node_peer.wait_for_backend_connection(6.0):
+		push_error("[Main] ❌ Timed out waiting for WebSocket connection")
+		_reset_host_buttons()
+		return
 
 	# Send handshake
 	print("[Main] 🤝 Sending handshake...")
 	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
-	await get_tree().create_timer(0.3).timeout
+	if not await node_peer.wait_for_handshake(6.0):
+		push_error("[Main] ❌ Timed out waiting for handshake acceptance")
+		_reset_host_buttons()
+		return
 
 # Join or create room
 	if room_id != "":
@@ -972,12 +978,18 @@ func _setup_websocket_client(room_code: String) -> void:
 
 	# Wait for WebSocket connection
 	print("[Main] ⏳ Waiting for connection...")
-	await get_tree().create_timer(0.5).timeout
+	if not await node_peer.wait_for_backend_connection(6.0):
+		push_error("[Main] ❌ Timed out waiting for WebSocket connection")
+		_reset_join_buttons()
+		return
 
 	# Send handshake
 	print("[Main] 🤝 Sending handshake...")
 	node_peer.send_handshake(str(server_version), Global.display_name, Global.auth_token)
-	await get_tree().create_timer(0.3).timeout
+	if not await node_peer.wait_for_handshake(6.0):
+		push_error("[Main] ❌ Timed out waiting for handshake acceptance")
+		_reset_join_buttons()
+		return
 
 	# Join room
 	print("[Main] 📤 Joining room: ", room_code)

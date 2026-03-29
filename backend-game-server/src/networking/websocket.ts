@@ -1,10 +1,13 @@
 import { WebSocketServer, WebSocket, RawData } from "ws";
 import http from "http";
-import { logInfo, logError } from "../utils/logger";
+import { logInfo, logError, logWarning } from "../utils/logger";
 import { RoomManager, GameRoom } from "../game/roomManager";
-import { verifyToken } from "../auth/jwt";
+import { verifyTokenWithFallback } from "../auth/jwt";
 import { RoomRepository } from "../database/repositories/roomRepository";
-import { UserRepository } from "../database/repositories/userRepository";
+import {
+  reportMatchToDjango,
+  MatchPlayerReport,
+} from "../integration/djangoMatchReporter";
 
 type Message = { type: string; data?: unknown };
 
@@ -18,12 +21,12 @@ type ClientSession = {
   ip: string;
   userId: number | null; // Added for authenticated users
   isAuthenticated: boolean; // Track if user is authenticated
+  accessToken: string | null;
 };
 
 const roomManager = new RoomManager();
 const clientSessions = new Map<WebSocket, ClientSession>();
 const roomRepo = new RoomRepository();
-const userRepo = new UserRepository();
 const activeUserRoomLocks = new Map<
   number,
   { roomId: string; ws: WebSocket }
@@ -105,18 +108,8 @@ function validateSessionIdentity(
     };
   }
 
-  const dbUser = userRepo.getUserById(session.userId);
-  if (!dbUser || !dbUser.is_active) {
-    return {
-      ok: false,
-      reason: "invalid_user_profile",
-      message: "User profile not found or inactive",
-    };
-  }
-
-  const dbUsername = dbUser.username.trim();
-  const tokenUsername = session.username.trim();
-  if (dbUsername.length === 0 || tokenUsername.length === 0) {
+  const canonicalUsername = session.username.trim();
+  if (canonicalUsername.length === 0) {
     return {
       ok: false,
       reason: "invalid_user_profile",
@@ -124,23 +117,20 @@ function validateSessionIdentity(
     };
   }
 
-  if (dbUsername !== tokenUsername) {
-    return {
-      ok: false,
-      reason: "identity_mismatch",
-      message: "Account identity mismatch detected. Please log in again.",
-    };
-  }
+  // Keep the active websocket session aligned with canonical user projection.
+  session.username = canonicalUsername;
 
   const displayName =
-    dbUser.display_name && dbUser.display_name.trim().length > 0
-      ? dbUser.display_name.trim()
-      : dbUsername;
+    session.name && session.name.trim().length > 0
+      ? session.name.trim()
+      : canonicalUsername;
+
+  session.name = displayName;
 
   return {
     ok: true,
-    userId: dbUser.id,
-    username: dbUsername,
+    userId: session.userId,
+    username: canonicalUsername,
     displayName,
   };
 }
@@ -251,11 +241,12 @@ export function setupWebSocket(server: http.Server) {
       ip,
       userId: null,
       isAuthenticated: false,
+      accessToken: null,
     };
     clientSessions.set(ws, session);
     logInfo(`ws: client connected from ${ip}`);
 
-    ws.on("message", (raw: RawData) => {
+    ws.on("message", async (raw: RawData) => {
       const msg = validateJson(raw.toString());
       if (!msg) {
         return send(ws, "error", { reason: "bad_json" });
@@ -275,45 +266,16 @@ export function setupWebSocket(server: http.Server) {
           const token = (msg.data as any).token;
           if (token) {
             // Verify JWT token
-            const user = verifyToken(token);
+            const user = await verifyTokenWithFallback(token);
             if (user) {
-              let syncedUser = null;
-              try {
-                syncedUser = userRepo.ensureExternalUser(
-                  user.userId,
-                  user.username,
-                  user.display_name,
-                );
-              } catch (error) {
-                logError(
-                  `failed to sync authenticated user ${user.userId}: ${String(error)}`,
-                );
-                return send(ws, "error", { reason: "user_sync_failed" });
-              }
-
-              if (!syncedUser || !syncedUser.is_active) {
-                return send(ws, "error", {
-                  reason: "invalid_user_profile",
-                  message: "Unable to load authenticated user profile",
-                });
-              }
-
-              // Reject any drift between token username and canonical DB profile for this user id.
-              if (syncedUser.username.trim() !== user.username.trim()) {
-                logError(
-                  `identity mismatch on handshake for userId=${user.userId}: tokenUsername=${user.username} dbUsername=${syncedUser.username}`,
-                );
-                return send(ws, "error", {
-                  reason: "identity_mismatch",
-                  message:
-                    "Account identity mismatch detected. Please log in again.",
-                });
-              }
-
               session.userId = user.userId;
               session.isAuthenticated = true;
-              session.username = syncedUser.username;
-              session.name = syncedUser.display_name || syncedUser.username;
+              session.accessToken = token;
+              session.username = user.username;
+              session.name =
+                user.display_name && user.display_name.trim().length > 0
+                  ? user.display_name
+                  : user.username;
               logInfo(
                 `authenticated user: userId=${user.userId} username=${session.username}`,
               );
@@ -867,6 +829,139 @@ export function setupWebSocket(server: http.Server) {
 
         case "ping": {
           send(ws, "pong", { ts: Date.now() });
+          break;
+        }
+
+        case "match_result": {
+          const identity = validateSessionIdentity(session);
+          if (!identity.ok || !session.accessToken) {
+            return send(ws, "error", {
+              reason: "authentication_required",
+              message:
+                "Authenticated host session required for match reporting",
+            });
+          }
+
+          if (!session.roomId || session.peerId === null) {
+            return send(ws, "error", { reason: "not_in_room" });
+          }
+
+          const room = roomManager.getRoom(session.roomId);
+          if (!room) {
+            return send(ws, "error", { reason: "room_not_found" });
+          }
+
+          if (!room.clients.get(session.peerId)?.isHost) {
+            return send(ws, "error", {
+              reason: "not_host",
+              message: "Only room host can submit match results",
+            });
+          }
+
+          const payload = (msg.data as any) || {};
+          const gamemode =
+            typeof payload.gamemode === "string" &&
+            payload.gamemode.trim().length > 0
+              ? payload.gamemode.trim()
+              : "unknown";
+
+          const winnerRaw = payload.winner_user_id ?? payload.winnerUserId;
+          const winnerUserId =
+            typeof winnerRaw === "number"
+              ? winnerRaw
+              : typeof winnerRaw === "string"
+                ? Number.parseInt(winnerRaw, 10)
+                : null;
+
+          const durationRaw =
+            payload.duration_seconds ?? payload.durationSeconds;
+          const durationSeconds =
+            typeof durationRaw === "number"
+              ? Math.max(0, Math.floor(durationRaw))
+              : typeof durationRaw === "string"
+                ? Math.max(0, Number.parseInt(durationRaw, 10) || 0)
+                : 0;
+
+          const sourcePlayers = Array.isArray(payload.players)
+            ? payload.players
+            : [];
+          const players: MatchPlayerReport[] = sourcePlayers
+            .map((entry: any) => {
+              const userIdRaw = entry?.user_id ?? entry?.userId;
+              const parsedUserId =
+                typeof userIdRaw === "number"
+                  ? userIdRaw
+                  : typeof userIdRaw === "string"
+                    ? Number.parseInt(userIdRaw, 10)
+                    : NaN;
+
+              if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
+                return null;
+              }
+
+              const kills = Number.parseInt(String(entry?.kills ?? 0), 10) || 0;
+              const deaths =
+                Number.parseInt(String(entry?.deaths ?? 0), 10) || 0;
+              const playtimeSeconds =
+                Number.parseInt(
+                  String(
+                    entry?.playtime_seconds ?? entry?.playtimeSeconds ?? 0,
+                  ),
+                  10,
+                ) || 0;
+
+              return {
+                user_id: parsedUserId,
+                kills: Math.max(0, kills),
+                deaths: Math.max(0, deaths),
+                playtime_seconds: Math.max(0, playtimeSeconds),
+                won: Boolean(entry?.won),
+              } satisfies MatchPlayerReport;
+            })
+            .filter(
+              (entry: MatchPlayerReport | null): entry is MatchPlayerReport =>
+                entry !== null,
+            );
+
+          if (players.length === 0) {
+            return send(ws, "error", {
+              reason: "invalid_match_result",
+              message: "players array must include at least one valid user_id",
+            });
+          }
+
+          reportMatchToDjango(session.accessToken, {
+            room_id: session.roomId,
+            gamemode,
+            winner_user_id:
+              winnerUserId && Number.isInteger(winnerUserId) && winnerUserId > 0
+                ? winnerUserId
+                : null,
+            duration_seconds: durationSeconds,
+            players,
+          })
+            .then((result) => {
+              send(ws, "match_result_saved", {
+                roomId: session.roomId,
+                matchId: result.match_id ?? null,
+                processedPlayers: result.processed_players ?? players.length,
+              });
+              logInfo(
+                `match_result persisted: roomId=${session.roomId} matchId=${result.match_id ?? "n/a"} players=${players.length}`,
+              );
+            })
+            .catch((err: unknown) => {
+              const errorMessage =
+                err instanceof Error ? err.message : String(err);
+              logWarning(
+                `match_result persistence failed for roomId=${session.roomId}: ${errorMessage}`,
+              );
+              send(ws, "match_result_error", {
+                roomId: session.roomId,
+                message: "Failed to persist match result",
+              });
+            });
+
           break;
         }
 
