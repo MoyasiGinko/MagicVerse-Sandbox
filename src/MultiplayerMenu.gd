@@ -64,6 +64,7 @@ func _ready() -> void:
 	$GlobalPlayMenu/HostHbox/HostServer.connect("pressed", _on_global_host_pressed)
 	$GlobalPlayMenu/JoinHbox/JoinRoom.connect("pressed", _on_global_join_pressed)
 	$GlobalPlayMenu/HostHbox/ServerListButton.connect("pressed", _on_global_server_list_pressed)
+	$GameModeMenu/Global.connect("pressed", _on_global_mode_selected)
 	print("[Menu] GlobalPlayMenu host/join buttons connected")
 
 	game_servers_request = HTTPRequest.new()
@@ -104,10 +105,12 @@ func _ready() -> void:
 	global_server_list = $GlobalPlayMenu/ServerList
 	if global_server_list and global_server_list.has_signal("room_selected"):
 		global_server_list.room_selected.connect(_on_global_room_selected)
+		global_server_list.set_all_servers_mode()
+		global_server_list_button.text = "All Servers"
 		print("[Menu] GlobalServerList connected")
 
 	if global_server_list_panel:
-		global_server_list_panel.visible = false
+		global_server_list_panel.visible = true
 
 	# Connect to RoomCreationDialog signals
 	room_creation_dialog = $RoomCreationDialog
@@ -211,6 +214,10 @@ func _commit_display_name(raw_text: String) -> void:
 func _on_global_host_pressed() -> void:
 	"""Open room creation dialog"""
 	print("[Menu] === HOST BUTTON PRESSED ===")
+	if global_server_list and global_server_list.is_all_servers_mode():
+		print("[Menu] ⚠️ All Servers mode is for browsing only; select a specific server before creating a room")
+		_on_global_server_list_pressed()
+		return
 	print("[Menu] Opening room creation dialog")
 	if room_creation_dialog:
 		room_creation_dialog.show_dialog()
@@ -311,11 +318,43 @@ func _on_game_servers_response(result: int, response_code: int, headers: PackedS
 		game_server_status_label.text = "No active servers found"
 		return
 
-	game_server_status_label.text = "Select a server to browse and join rooms"
+	game_server_status_label.text = "Choose All Servers or a specific server"
+	_create_all_servers_entry()
 	for entry_value: Variant in servers:
 		if not (entry_value is Dictionary):
 			continue
 		_create_game_server_entry(entry_value as Dictionary)
+
+func _create_all_servers_entry() -> void:
+	if not game_server_list_container:
+		return
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(0, 70)
+	game_server_list_container.add_child(card)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	card.add_child(row)
+
+	var text_col := VBoxContainer.new()
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text_col)
+
+	var name_label := Label.new()
+	name_label.text = "All Servers"
+	text_col.add_child(name_label)
+
+	var details_label := Label.new()
+	details_label.modulate = Color(1, 1, 1, 0.7)
+	details_label.text = "Region: all   Status: mixed   Rooms: aggregated"
+	text_col.add_child(details_label)
+
+	var select_button := Button.new()
+	select_button.text = "Select"
+	select_button.custom_minimum_size = Vector2(90, 0)
+	select_button.pressed.connect(_on_all_servers_selected)
+	row.add_child(select_button)
 
 func _create_game_server_entry(server_data: Dictionary) -> void:
 	if not game_server_list_container:
@@ -336,15 +375,44 @@ func _create_game_server_entry(server_data: Dictionary) -> void:
 	var name_label := Label.new()
 	var server_name := str(server_data.get("name", "Unnamed Server"))
 	var region := str(server_data.get("region", "global"))
-	var current_players := str(server_data.get("current_players", 0)).to_int()
-	var max_players := str(server_data.get("max_players", 64)).to_int()
-	name_label.text = "%s (%s)  %d/%d" % [server_name, region, current_players, max_players]
+	name_label.text = server_name
 	text_col.add_child(name_label)
 
-	var url_label := Label.new()
-	url_label.modulate = Color(1, 1, 1, 0.65)
-	url_label.text = str(server_data.get("api_url", ""))
-	text_col.add_child(url_label)
+	var details_label := Label.new()
+	var is_active_value: Variant = server_data.get("is_active", true)
+	var is_active: bool = true
+	if is_active_value is bool:
+		is_active = is_active_value
+	elif is_active_value is int:
+		is_active = (is_active_value as int) != 0
+	elif is_active_value is float:
+		is_active = (is_active_value as float) != 0.0
+	var status := "online" if is_active else "offline"
+
+	var current_rooms_value: Variant = server_data.get("current_rooms", 0)
+	var current_rooms: int = 0
+	if current_rooms_value is int:
+		current_rooms = current_rooms_value
+	elif current_rooms_value is bool:
+		current_rooms = 1 if (current_rooms_value as bool) else 0
+	elif current_rooms_value is float:
+		current_rooms = int(current_rooms_value as float)
+
+	var max_rooms_value: Variant = server_data.get("max_rooms", 0)
+	var max_rooms: int = 0
+	if max_rooms_value is int:
+		max_rooms = max_rooms_value
+	elif max_rooms_value is bool:
+		max_rooms = 1 if (max_rooms_value as bool) else 0
+	elif max_rooms_value is float:
+		max_rooms = int(max_rooms_value as float)
+
+	if max_rooms > 0:
+		details_label.text = "Region: %s   Status: %s   Rooms: %d/%d" % [region, status, current_rooms, max_rooms]
+	else:
+		details_label.text = "Region: %s   Status: %s   Rooms: %d" % [region, status, current_rooms]
+	details_label.modulate = Color(1, 1, 1, 0.7)
+	text_col.add_child(details_label)
 
 	var select_button := Button.new()
 	select_button.text = "Select"
@@ -364,9 +432,32 @@ func _on_game_server_selected(server_data: Dictionary) -> void:
 		global_server_list_panel.visible = true
 
 	if global_server_list:
+		global_server_list.set_specific_server_mode(server_data)
 		global_server_list.refresh_server_list()
 
 	print("[Menu] 🌐 Selected game server: ", selected_name)
+
+func _on_all_servers_selected() -> void:
+	global_server_list_button.text = "All Servers"
+
+	if game_server_dialog:
+		game_server_dialog.hide()
+
+	if global_server_list_panel:
+		global_server_list_panel.visible = true
+
+	if global_server_list:
+		global_server_list.set_all_servers_mode()
+		global_server_list.refresh_server_list()
+
+func _on_global_mode_selected() -> void:
+	if global_server_list_button:
+		global_server_list_button.text = "All Servers"
+	if global_server_list_panel:
+		global_server_list_panel.visible = true
+	if global_server_list:
+		global_server_list.set_all_servers_mode()
+		global_server_list.refresh_server_list()
 
 func _on_room_created(room_id: String, room_data: Dictionary) -> void:
 	"""Handle new room creation - this is the HOST"""

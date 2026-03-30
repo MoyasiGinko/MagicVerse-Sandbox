@@ -27,6 +27,7 @@ func fetch_rooms() -> void:
 		print("[GlobalPMBackend] ❌ Not authenticated; cannot fetch rooms")
 		rooms_fetched.emit([])
 		return
+	base_api_url = BackendConfig.get_node_api_base_url()
 	var url := base_api_url + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
@@ -42,6 +43,7 @@ func create_room(config: Dictionary) -> void:
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[GlobalPMBackend] ❌ Not authenticated; cannot create room")
 		return
+	base_api_url = BackendConfig.get_node_api_base_url()
 	var url := base_api_url + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,

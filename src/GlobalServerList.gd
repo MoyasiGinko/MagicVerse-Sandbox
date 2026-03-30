@@ -27,12 +27,28 @@ var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
 var current_rooms: Array = []
 var _http_refresh: HTTPRequest  # Dedicated HTTPRequest for continuous refreshes
+var _http_all_registry: HTTPRequest
 var ws_manager: GlobalWebSocketManager  # Reference to WebSocket manager
 var _last_join_click_time_ms: int = 0
 var _last_join_room_id: String = ""
 var _join_in_progress: bool = false
+var _scope_mode: String = "all"
+var _selected_server: Dictionary = {}
+var _rooms_request_in_flight: bool = false
+var _registry_request_in_flight: bool = false
+var _pending_rooms_refresh: bool = false
+var _pending_registry_refresh: bool = false
 const JOIN_CLICK_DEBOUNCE_MS: int = 2000
 const REALTIME_REFRESH_INTERVAL_SEC: float = 2.0
+
+func _variant_to_int(value: Variant, fallback: int = 0) -> int:
+	if value is int:
+		return value as int
+	if value is bool:
+		return 1 if (value as bool) else 0
+	if value is float:
+		return int(value as float)
+	return fallback
 
 func _ready() -> void:
 	print("[ServerList] Initializing...")
@@ -68,6 +84,10 @@ func _ready() -> void:
 	add_child(_http_refresh)
 	_http_refresh.request_completed.connect(_on_refresh_response)
 
+	_http_all_registry = HTTPRequest.new()
+	add_child(_http_all_registry)
+	_http_all_registry.request_completed.connect(_on_all_registry_response)
+
 	# Periodic fallback refresh keeps list state fresh even if a WS event is missed.
 	refresh_timer = Timer.new()
 	add_child(refresh_timer)
@@ -98,6 +118,7 @@ func _ready() -> void:
 	# Initial load
 	if Global.is_authenticated:
 		print("[ServerList] User authenticated, loading initial server list")
+		set_all_servers_mode()
 		refresh_server_list()
 	else:
 		print("[ServerList] User not authenticated yet, skipping initial load")
@@ -108,30 +129,182 @@ func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
 	if not Global.is_authenticated or Global.auth_token == "":
 		return
-	var url := BackendConfig.get_node_api_base_url() + "/rooms"
+	if _scope_mode == "all":
+		_fetch_all_servers_rooms()
+		return
+
+	var server_api := str(_selected_server.get("api_url", "")).strip_edges()
+	if server_api == "":
+		server_api = BackendConfig.get_node_api_base_url()
+
+	var url := server_api + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
 		"Content-Type: application/json"
 	]
-	_http_refresh.request(url, headers)
+	if _rooms_request_in_flight:
+		_pending_rooms_refresh = true
+		return
+	var err := _http_refresh.request(url, headers)
+	if err == OK:
+		_rooms_request_in_flight = true
+		_pending_rooms_refresh = false
+
+func set_all_servers_mode() -> void:
+	_scope_mode = "all"
+	_selected_server = {}
+
+func set_specific_server_mode(server_data: Dictionary) -> void:
+	_scope_mode = "specific"
+	_selected_server = server_data.duplicate(true)
+
+func is_all_servers_mode() -> bool:
+	return _scope_mode == "all"
+
+func _fetch_all_servers_rooms() -> void:
+	var url := BackendConfig.get_django_api_base_url() + "/game-servers"
+	var headers: PackedStringArray = [
+		"Authorization: Bearer " + Global.auth_token,
+		"Content-Type: application/json"
+	]
+	if _registry_request_in_flight:
+		_pending_registry_refresh = true
+		return
+	var err := _http_all_registry.request(url, headers)
+	if err == OK:
+		_registry_request_in_flight = true
+		_pending_registry_refresh = false
+		return
+	if err == ERR_BUSY:
+		# Another refresh request is still running; do not show a false error state.
+		_pending_registry_refresh = true
+		return
+	if err != OK:
+		_show_error_state("Could not fetch server registry")
+
+func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
+	var api_url := str(server_data.get("api_url", "")).strip_edges()
+	if api_url == "":
+		return []
+
+	var headers: PackedStringArray = [
+		"Authorization: Bearer " + Global.auth_token,
+		"Content-Type: application/json"
+	]
+	var req := HTTPRequest.new()
+	add_child(req)
+	var err := req.request(api_url + "/rooms", headers)
+	if err != OK:
+		req.queue_free()
+		return []
+
+	var result_data: Array = await req.request_completed
+	req.queue_free()
+	if result_data.size() < 4:
+		return []
+
+	var result: int = _variant_to_int(result_data[0], HTTPRequest.RESULT_CANT_CONNECT)
+	var response_code: int = _variant_to_int(result_data[1], 0)
+	var body := result_data[3] as PackedByteArray
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		return []
+
+	var json := JSON.new()
+	if json.parse(body.get_string_from_utf8()) != OK or not (json.data is Dictionary):
+		return []
+
+	var payload := json.data as Dictionary
+	var rooms := payload.get("rooms", []) as Array
+	var merged: Array = []
+	for room_value: Variant in rooms:
+		if not (room_value is Dictionary):
+			continue
+		var room := (room_value as Dictionary).duplicate(true)
+		room["server"] = server_data
+		merged.append(room)
+	return merged
+
+func _on_all_registry_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		_registry_request_in_flight = false
+		_show_error_state("Could not load server registry")
+		return
+
+	var json := JSON.new()
+	if json.parse(body.get_string_from_utf8()) != OK or not (json.data is Dictionary):
+		_registry_request_in_flight = false
+		_show_error_state("Invalid server registry response")
+		return
+
+	var payload := json.data as Dictionary
+	var servers := payload.get("servers", []) as Array
+	await _load_all_rooms_from_servers(servers)
+	_registry_request_in_flight = false
+	if _pending_registry_refresh:
+		_pending_registry_refresh = false
+		call_deferred("_fetch_all_servers_rooms")
+
+func _load_all_rooms_from_servers(servers: Array) -> void:
+	var all_rooms: Array = []
+	for server_value: Variant in servers:
+		if not (server_value is Dictionary):
+			continue
+		var server_data := server_value as Dictionary
+		var rooms_for_server: Array = await _fetch_rooms_for_server(server_data)
+		for room_value: Variant in rooms_for_server:
+			all_rooms.append(room_value)
+
+	_on_rooms_fetched(all_rooms)
 
 func _on_refresh_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	"""Handle rooms response from direct HTTP request"""
+	_rooms_request_in_flight = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		if _pending_rooms_refresh:
+			_pending_rooms_refresh = false
+			call_deferred("refresh_server_list")
 		return
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
+		if _pending_rooms_refresh:
+			_pending_rooms_refresh = false
+			call_deferred("refresh_server_list")
 		return
 	var data := json.data as Dictionary
 	var rooms: Array = data.get("rooms", []) as Array
 	_on_rooms_fetched(rooms)
+	if _pending_rooms_refresh:
+		_pending_rooms_refresh = false
+		call_deferred("refresh_server_list")
 
 func _on_rooms_fetched(rooms: Array) -> void:
 	"""Handle rooms fetched from backend script"""
-	print("[ServerList] 📥 Received ", rooms.size(), " rooms")
-	current_rooms = rooms
-	_populate_server_list(rooms)
+	var sorted_rooms := rooms.duplicate(true)
+	sorted_rooms.sort_custom(_sort_room_by_fill_desc)
+	print("[ServerList] 📥 Received ", sorted_rooms.size(), " rooms")
+	current_rooms = sorted_rooms
+	_populate_server_list(sorted_rooms)
+
+func _sort_room_by_fill_desc(a: Variant, b: Variant) -> bool:
+	if not (a is Dictionary) or not (b is Dictionary):
+		return false
+
+	var room_a := a as Dictionary
+	var room_b := b as Dictionary
+	var current_a: int = _variant_to_int(room_a.get("current_players", 0), 0)
+	var current_b: int = _variant_to_int(room_b.get("current_players", 0), 0)
+	if current_a != current_b:
+		return current_a > current_b
+
+	var max_a: int = max(_variant_to_int(room_a.get("max_players", 1), 1), 1)
+	var max_b: int = max(_variant_to_int(room_b.get("max_players", 1), 1), 1)
+	var ratio_a: float = float(current_a) / float(max_a)
+	var ratio_b: float = float(current_b) / float(max_b)
+	if ratio_a != ratio_b:
+		return ratio_a > ratio_b
+
+	return str(room_a.get("id", "")) < str(room_b.get("id", ""))
 
 func _on_rooms_changed_websocket() -> void:
 	"""Handle real-time room list changes from WebSocket"""
@@ -214,9 +387,18 @@ func _create_room_entry(room: Dictionary) -> void:
 	status_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	hbox.add_child(status_vbox)
 
-	var current_players: int = room.get("current_players", 0)
-	var max_players: int = room.get("max_players", 8)
-	var is_full: bool = room.get("is_full", false)
+	var current_players: int = _variant_to_int(room.get("current_players", 0), 0)
+	var max_players: int = max(_variant_to_int(room.get("max_players", 8), 8), 1)
+	var is_full_value: Variant = room.get("is_full", false)
+	var is_full: bool = false
+	if is_full_value is bool:
+		is_full = is_full_value as bool
+	elif is_full_value is int:
+		is_full = (is_full_value as int) != 0
+	elif is_full_value is float:
+		is_full = (is_full_value as float) != 0.0
+	else:
+		is_full = current_players >= max_players
 
 	var player_count_label := Label.new()
 	player_count_label.text = "%d / %d" % [current_players, max_players]
