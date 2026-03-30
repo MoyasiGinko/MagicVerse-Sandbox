@@ -38,8 +38,37 @@ var _rooms_request_in_flight: bool = false
 var _registry_request_in_flight: bool = false
 var _pending_rooms_refresh: bool = false
 var _pending_registry_refresh: bool = false
+var _active_specific_server_id: String = ""
+var _requested_specific_server_id: String = ""
+var _active_specific_server_api: String = ""
+var _active_registry_scope: String = ""
 const JOIN_CLICK_DEBOUNCE_MS: int = 2000
 const REALTIME_REFRESH_INTERVAL_SEC: float = 2.0
+
+func _normalize_server_api_url(raw_url: String) -> String:
+	var value := raw_url.strip_edges()
+	while value.ends_with("/"):
+		value = value.left(value.length() - 1)
+	if value == "":
+		return ""
+	if value.ends_with("/api"):
+		return value
+
+	# Some registry entries may provide only the host URL; rooms endpoint expects API base.
+	var scheme_pos := value.find("://")
+	if scheme_pos == -1:
+		return value
+	var host_start := scheme_pos + 3
+	var path_start := value.find("/", host_start)
+	if path_start == -1:
+		return value + "/api"
+
+	var path := value.substr(path_start, value.length() - path_start)
+	if path == "":
+		return value + "/api"
+	if path.begins_with("/api"):
+		return value
+	return value
 
 func _variant_to_int(value: Variant, fallback: int = 0) -> int:
 	if value is int:
@@ -129,13 +158,17 @@ func refresh_server_list() -> void:
 	"""Fetch the room list from the backend API"""
 	if not Global.is_authenticated or Global.auth_token == "":
 		return
+	var selected_id := str(_selected_server.get("id", ""))
+	var selected_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
+	print("[ServerList] 🔄 refresh_server_list mode=", _scope_mode, " selected_id=", selected_id, " selected_api=", selected_api)
 	if _scope_mode == "all":
 		_fetch_all_servers_rooms()
 		return
 
-	var server_api := str(_selected_server.get("api_url", "")).strip_edges()
+	var server_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
 	if server_api == "":
-		server_api = BackendConfig.get_node_api_base_url()
+		server_api = _normalize_server_api_url(BackendConfig.get_node_api_base_url())
+	_requested_specific_server_id = str(_selected_server.get("id", ""))
 
 	var url := server_api + "/rooms"
 	var headers: PackedStringArray = [
@@ -149,14 +182,25 @@ func refresh_server_list() -> void:
 	if err == OK:
 		_rooms_request_in_flight = true
 		_pending_rooms_refresh = false
+		_active_specific_server_id = _requested_specific_server_id
+		_active_specific_server_api = server_api
+		return
+	if err == ERR_BUSY:
+		_pending_rooms_refresh = true
+		return
+	print("[ServerList] ❌ Specific refresh request failed: ", err, " url=", url)
 
 func set_all_servers_mode() -> void:
 	_scope_mode = "all"
 	_selected_server = {}
+	_active_specific_server_id = ""
+	_active_specific_server_api = ""
 
 func set_specific_server_mode(server_data: Dictionary) -> void:
 	_scope_mode = "specific"
 	_selected_server = server_data.duplicate(true)
+	_pending_registry_refresh = false
+	_active_registry_scope = ""
 
 func is_all_servers_mode() -> bool:
 	return _scope_mode == "all"
@@ -174,6 +218,7 @@ func _fetch_all_servers_rooms() -> void:
 	if err == OK:
 		_registry_request_in_flight = true
 		_pending_registry_refresh = false
+		_active_registry_scope = _scope_mode
 		return
 	if err == ERR_BUSY:
 		# Another refresh request is still running; do not show a false error state.
@@ -183,7 +228,7 @@ func _fetch_all_servers_rooms() -> void:
 		_show_error_state("Could not fetch server registry")
 
 func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
-	var api_url := str(server_data.get("api_url", "")).strip_edges()
+	var api_url := _normalize_server_api_url(str(server_data.get("api_url", "")))
 	if api_url == "":
 		return []
 
@@ -225,6 +270,10 @@ func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
 	return merged
 
 func _on_all_registry_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	if _active_registry_scope != "all" or _scope_mode != "all":
+		_registry_request_in_flight = false
+		return
+
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
 		_registry_request_in_flight = false
 		_show_error_state("Could not load server registry")
@@ -240,13 +289,18 @@ func _on_all_registry_response(result: int, response_code: int, headers: PackedS
 	var servers := payload.get("servers", []) as Array
 	await _load_all_rooms_from_servers(servers)
 	_registry_request_in_flight = false
-	if _pending_registry_refresh:
+	if _pending_registry_refresh and _scope_mode == "all":
 		_pending_registry_refresh = false
 		call_deferred("_fetch_all_servers_rooms")
 
 func _load_all_rooms_from_servers(servers: Array) -> void:
+	if _scope_mode != "all":
+		return
+
 	var all_rooms: Array = []
 	for server_value: Variant in servers:
+		if _scope_mode != "all":
+			return
 		if not (server_value is Dictionary):
 			continue
 		var server_data := server_value as Dictionary
@@ -254,12 +308,38 @@ func _load_all_rooms_from_servers(servers: Array) -> void:
 		for room_value: Variant in rooms_for_server:
 			all_rooms.append(room_value)
 
-	_on_rooms_fetched(all_rooms)
+	if _scope_mode == "all":
+		_on_rooms_fetched(all_rooms)
 
 func _on_refresh_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	"""Handle rooms response from direct HTTP request"""
 	_rooms_request_in_flight = false
+	if _scope_mode != "specific":
+		if _pending_rooms_refresh:
+			_pending_rooms_refresh = false
+			call_deferred("refresh_server_list")
+		return
+
+	var selected_server_id_now := str(_selected_server.get("id", ""))
+	var selected_server_api_now := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
+	if selected_server_api_now == "":
+		selected_server_api_now = _normalize_server_api_url(BackendConfig.get_node_api_base_url())
+
+	var stale_response := false
+	if _active_specific_server_api != "" and selected_server_api_now != _active_specific_server_api:
+		stale_response = true
+	elif _active_specific_server_id != "" and selected_server_id_now != "" and selected_server_id_now != _active_specific_server_id:
+		stale_response = true
+
+	if stale_response:
+		# Ignore stale response from previous specific-server selection.
+		if _pending_rooms_refresh:
+			_pending_rooms_refresh = false
+		call_deferred("refresh_server_list")
+		return
+
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		print("[ServerList] ⚠️ Specific refresh response failed: result=", result, " code=", response_code, " active_api=", _active_specific_server_api)
 		if _pending_rooms_refresh:
 			_pending_rooms_refresh = false
 			call_deferred("refresh_server_list")
@@ -267,6 +347,7 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
+		print("[ServerList] ⚠️ Failed to parse rooms response as JSON. active_api=", _active_specific_server_api)
 		if _pending_rooms_refresh:
 			_pending_rooms_refresh = false
 			call_deferred("refresh_server_list")
