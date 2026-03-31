@@ -22,7 +22,6 @@ signal room_selected(room_id: String, room_data: Dictionary)
 var scroll_container: ScrollContainer
 var list_container: VBoxContainer
 var refresh_button: Button
-var capacity_label: Label
 @export var backend_path: NodePath = NodePath("../Backend")
 var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
@@ -166,7 +165,7 @@ func refresh_server_list() -> void:
 	var selected_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
 	print("[ServerList] 🔄 refresh_server_list mode=", _scope_mode, " selected_id=", selected_id, " selected_api=", selected_api)
 	if _scope_mode == "all":
-		_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
+		_set_capacity_text("Loading...", Color(1, 1, 1, 0.7))
 		_fetch_all_servers_rooms()
 		return
 
@@ -189,7 +188,7 @@ func refresh_server_list() -> void:
 		_pending_rooms_refresh = false
 		_active_specific_server_id = _requested_specific_server_id
 		_active_specific_server_api = server_api
-		_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
+		_set_capacity_text("Loading...", Color(1, 1, 1, 0.7))
 		return
 	if err == ERR_BUSY:
 		_pending_rooms_refresh = true
@@ -201,7 +200,7 @@ func set_all_servers_mode() -> void:
 	_selected_server = {}
 	_active_specific_server_id = ""
 	_active_specific_server_api = ""
-	_set_capacity_text("Active Rooms: all servers", Color(1, 1, 1, 0.7))
+	_set_capacity_text("All servers", Color(1, 1, 1, 0.7))
 
 func set_specific_server_mode(server_data: Dictionary) -> void:
 	_scope_mode = "specific"
@@ -211,7 +210,7 @@ func set_specific_server_mode(server_data: Dictionary) -> void:
 	# Clear stale entries immediately so previous scope/server rooms are not shown.
 	current_rooms.clear()
 	_populate_server_list([])
-	_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
+	_set_capacity_text("Loading...", Color(1, 1, 1, 0.7))
 
 func is_all_servers_mode() -> bool:
 	return _scope_mode == "all"
@@ -355,12 +354,12 @@ func _load_all_rooms_from_servers(servers: Array) -> void:
 
 	if has_known_max:
 		_set_capacity_text(
-			"Active Rooms: %d/%d (all servers)" % [aggregated_current_rooms, aggregated_max_rooms],
+			"%d/%d (all servers)" % [aggregated_current_rooms, aggregated_max_rooms],
 			Color(1, 1, 1, 0.8),
 		)
 	else:
 		_set_capacity_text(
-			"Active Rooms: %d (all servers)" % [aggregated_current_rooms],
+			"%d (all servers)" % [aggregated_current_rooms],
 			Color(1, 1, 1, 0.8),
 		)
 
@@ -416,11 +415,11 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 		var current_rooms := _variant_to_int(cap.get("current_rooms", rooms.size()), rooms.size())
 		var max_rooms := _variant_to_int(cap.get("max_rooms", -1), -1)
 		if max_rooms >= 0:
-			_set_capacity_text("Active Rooms: %d/%d" % [current_rooms, max_rooms], Color(1, 1, 1, 0.8))
+			_set_capacity_text("%d/%d" % [current_rooms, max_rooms], Color(1, 1, 1, 0.8))
 		else:
-			_set_capacity_text("Active Rooms: %d" % [current_rooms], Color(1, 1, 1, 0.8))
+			_set_capacity_text("%d" % [current_rooms], Color(1, 1, 1, 0.8))
 	else:
-		_set_capacity_text("Active Rooms: %d" % [rooms.size()], Color(1, 1, 1, 0.8))
+		_set_capacity_text("%d" % [rooms.size()], Color(1, 1, 1, 0.8))
 	_on_rooms_fetched(rooms)
 	if _pending_rooms_refresh:
 		_pending_rooms_refresh = false
@@ -636,28 +635,15 @@ func _show_error_state(error_message: String) -> void:
 	label.custom_minimum_size = Vector2(0, 100)
 	list_container.add_child(label)
 	print("[ServerList] ❌ Error message displayed to user: ", error_message)
-	_set_capacity_text("Active Rooms: unavailable", Color(1, 0.6, 0.6, 0.9))
+	_set_capacity_text("Unavailable", Color(1, 0.6, 0.6, 0.9))
 
 func _ensure_capacity_banner() -> void:
-	if capacity_label:
-		return
-	capacity_label = Label.new()
-	capacity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	capacity_label.modulate = Color(1, 1, 1, 0.7)
-	capacity_label.text = "Active Rooms: --"
-
-	if has_node("MainVBox"):
-		var main_vbox := get_node("MainVBox") as VBoxContainer
-		main_vbox.add_child(capacity_label)
-		main_vbox.move_child(capacity_label, 1)
-	else:
-		add_child(capacity_label)
+	# Capacity banner intentionally disabled: no text should be shown in this area.
+	return
 
 func _set_capacity_text(text: String, tint: Color = Color(1, 1, 1, 0.7)) -> void:
-	if not capacity_label:
-		return
-	capacity_label.text = text
-	capacity_label.modulate = tint
+	# Capacity banner intentionally disabled: ignore all text updates.
+	return
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
