@@ -40,7 +40,6 @@ var _pending_rooms_refresh: bool = false
 var _pending_registry_refresh: bool = false
 var _active_specific_server_id: String = ""
 var _requested_specific_server_id: String = ""
-var _active_specific_server_api: String = ""
 var _active_registry_scope: String = ""
 const JOIN_CLICK_DEBOUNCE_MS: int = 2000
 const REALTIME_REFRESH_INTERVAL_SEC: float = 2.0
@@ -187,7 +186,6 @@ func refresh_server_list() -> void:
 		_rooms_request_in_flight = true
 		_pending_rooms_refresh = false
 		_active_specific_server_id = _requested_specific_server_id
-		_active_specific_server_api = server_api
 		_set_capacity_text("Loading...", Color(1, 1, 1, 0.7))
 		return
 	if err == ERR_BUSY:
@@ -199,7 +197,6 @@ func set_all_servers_mode() -> void:
 	_scope_mode = "all"
 	_selected_server = {}
 	_active_specific_server_id = ""
-	_active_specific_server_api = ""
 	_set_capacity_text("All servers", Color(1, 1, 1, 0.7))
 
 func set_specific_server_mode(server_data: Dictionary) -> void:
@@ -333,12 +330,18 @@ func _load_all_rooms_from_servers(servers: Array) -> void:
 	var aggregated_current_rooms: int = 0
 	var aggregated_max_rooms: int = 0
 	var has_known_max: bool = false
+	var seen_server_ids: Dictionary = {}
 	for server_value: Variant in servers:
 		if _scope_mode != "all":
 			return
 		if not (server_value is Dictionary):
 			continue
 		var server_data := server_value as Dictionary
+		var server_id := str(server_data.get("id", "")).strip_edges()
+		if server_id != "":
+			if seen_server_ids.has(server_id):
+				continue
+			seen_server_ids[server_id] = true
 		var fetch_result: Dictionary = await _fetch_rooms_for_server(server_data)
 		var rooms_for_server: Array = fetch_result.get("rooms", []) as Array
 		var capacity: Variant = fetch_result.get("server_capacity", {})
@@ -376,14 +379,9 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 		return
 
 	var selected_server_id_now := str(_selected_server.get("id", ""))
-	var selected_server_api_now := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
-	if selected_server_api_now == "":
-		selected_server_api_now = _normalize_server_api_url(BackendConfig.get_node_api_base_url())
 
 	var stale_response := false
-	if _active_specific_server_api != "" and selected_server_api_now != _active_specific_server_api:
-		stale_response = true
-	elif _active_specific_server_id != "" and selected_server_id_now != "" and selected_server_id_now != _active_specific_server_id:
+	if _active_specific_server_id != "" and selected_server_id_now != "" and selected_server_id_now != _active_specific_server_id:
 		stale_response = true
 
 	if stale_response:
@@ -394,7 +392,7 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 		return
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
-		print("[ServerList] ⚠️ Specific refresh response failed: result=", result, " code=", response_code, " active_api=", _active_specific_server_api)
+		print("[ServerList] ⚠️ Specific refresh response failed: result=", result, " code=", response_code, " active_server_id=", _active_specific_server_id)
 		if _pending_rooms_refresh:
 			_pending_rooms_refresh = false
 			call_deferred("refresh_server_list")
@@ -402,7 +400,7 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 	var json_text: String = body.get_string_from_utf8()
 	var json := JSON.new()
 	if json.parse(json_text) != OK:
-		print("[ServerList] ⚠️ Failed to parse rooms response as JSON. active_api=", _active_specific_server_api)
+		print("[ServerList] ⚠️ Failed to parse rooms response as JSON. active_server_id=", _active_specific_server_id)
 		if _pending_rooms_refresh:
 			_pending_rooms_refresh = false
 			call_deferred("refresh_server_list")
