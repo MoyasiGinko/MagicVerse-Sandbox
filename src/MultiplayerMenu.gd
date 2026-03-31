@@ -31,8 +31,151 @@ var game_servers_request: HTTPRequest
 var game_server_dialog: AcceptDialog
 var game_server_status_label: Label
 var game_server_list_container: VBoxContainer
+var server_selector_refresh_timer: Timer
+var _selector_room_labels: Dictionary = {}
+var _selector_servers_snapshot: Array = []
+var _selector_refresh_generation: int = 0
+var _selector_live_refresh_in_flight: bool = false
 var _global_join_in_progress: bool = false
 var _last_display_name: String = ""
+
+func _variant_to_int(value: Variant, fallback: int = 0) -> int:
+	if value is int:
+		return value as int
+	if value is bool:
+		return 1 if (value as bool) else 0
+	if value is float:
+		return int(value as float)
+	return fallback
+
+func _normalize_server_api_url(raw_url: String) -> String:
+	var value := raw_url.strip_edges()
+	while value.ends_with("/"):
+		value = value.left(value.length() - 1)
+	if value == "":
+		return ""
+	if value.ends_with("/api"):
+		return value
+
+	var scheme_pos := value.find("://")
+	if scheme_pos == -1:
+		return value
+	var host_start := scheme_pos + 3
+	var path_start := value.find("/", host_start)
+	if path_start == -1:
+		return value + "/api"
+
+	var path := value.substr(path_start, value.length() - path_start)
+	if path == "":
+		return value + "/api"
+	if path.begins_with("/api"):
+		return value
+	return value
+
+func _set_selector_details_text(details_label: Label, server_data: Dictionary, current_rooms: int, max_rooms: int) -> void:
+	var region := str(server_data.get("region", "global"))
+	var is_active_value: Variant = server_data.get("is_active", true)
+	var is_active: bool = true
+	if is_active_value is bool:
+		is_active = is_active_value
+	elif is_active_value is int:
+		is_active = (is_active_value as int) != 0
+	elif is_active_value is float:
+		is_active = (is_active_value as float) != 0.0
+	var status := "online" if is_active else "offline"
+
+	if max_rooms > 0:
+		details_label.text = "Region: %s   Status: %s   Rooms: %d/%d" % [region, status, current_rooms, max_rooms]
+	else:
+		details_label.text = "Region: %s   Status: %s   Rooms: %d" % [region, status, current_rooms]
+
+func _fetch_live_server_capacity(server_data: Dictionary) -> Dictionary:
+	if not Global.is_authenticated or Global.auth_token == "":
+		return {}
+
+	var api_url := _normalize_server_api_url(str(server_data.get("api_url", "")))
+	if api_url == "":
+		return {}
+
+	var headers: PackedStringArray = [
+		"Authorization: Bearer " + Global.auth_token,
+		"Content-Type: application/json"
+	]
+	var req := HTTPRequest.new()
+	add_child(req)
+	var err := req.request(api_url + "/rooms", headers)
+	if err != OK:
+		req.queue_free()
+		return {}
+
+	var result_data: Array = await req.request_completed
+	req.queue_free()
+	if result_data.size() < 4:
+		return {}
+
+	var result: int = _variant_to_int(result_data[0], HTTPRequest.RESULT_CANT_CONNECT)
+	var response_code: int = _variant_to_int(result_data[1], 0)
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		return {}
+
+	var body := result_data[3] as PackedByteArray
+	var json := JSON.new()
+	if json.parse(body.get_string_from_utf8()) != OK or not (json.data is Dictionary):
+		return {}
+
+	var payload := json.data as Dictionary
+	var server_capacity: Variant = payload.get("server_capacity", {})
+	if server_capacity is Dictionary:
+		return (server_capacity as Dictionary).duplicate(true)
+
+	# Fallback if server_capacity is absent on a legacy node build.
+	var rooms := payload.get("rooms", []) as Array
+	return {
+		"current_rooms": rooms.size(),
+		"max_rooms": _variant_to_int(server_data.get("max_rooms", -1), -1),
+	}
+
+func _refresh_selector_live_room_counts(servers: Array, generation: int) -> void:
+	if _selector_live_refresh_in_flight:
+		return
+	if generation != _selector_refresh_generation:
+		return
+	if not game_server_dialog or not game_server_dialog.visible:
+		return
+
+	_selector_live_refresh_in_flight = true
+	for entry_value: Variant in servers:
+		if generation != _selector_refresh_generation:
+			break
+		if not (entry_value is Dictionary):
+			continue
+		var server_data := entry_value as Dictionary
+		var server_id := str(server_data.get("id", ""))
+		if server_id == "":
+			continue
+
+		var details_label := _selector_room_labels.get(server_id, null) as Label
+		if not details_label:
+			continue
+
+		var live_capacity: Dictionary = await _fetch_live_server_capacity(server_data)
+		if live_capacity.is_empty():
+			continue
+
+		var current_rooms := _variant_to_int(live_capacity.get("current_rooms", server_data.get("current_rooms", 0)), 0)
+		var max_rooms := _variant_to_int(live_capacity.get("max_rooms", server_data.get("max_rooms", -1)), -1)
+		_set_selector_details_text(details_label, server_data, current_rooms, max_rooms)
+
+	_selector_live_refresh_in_flight = false
+
+func _on_server_selector_refresh_tick() -> void:
+	if not game_server_dialog or not game_server_dialog.visible:
+		if server_selector_refresh_timer:
+			server_selector_refresh_timer.stop()
+		return
+	if _selector_servers_snapshot.is_empty():
+		return
+	call_deferred("_refresh_selector_live_room_counts", _selector_servers_snapshot, _selector_refresh_generation)
 
 func _ready() -> void:
 	auth_manager = AuthenticationManager.new()
@@ -70,6 +213,12 @@ func _ready() -> void:
 	game_servers_request = HTTPRequest.new()
 	add_child(game_servers_request)
 	game_servers_request.request_completed.connect(_on_game_servers_response)
+
+	server_selector_refresh_timer = Timer.new()
+	add_child(server_selector_refresh_timer)
+	server_selector_refresh_timer.wait_time = 2.0
+	server_selector_refresh_timer.one_shot = false
+	server_selector_refresh_timer.timeout.connect(_on_server_selector_refresh_tick)
 
 	shirt_colour_picker.connect("color_changed", Global.set_shirt_colour)
 	hair_colour_picker.connect("color_changed", Global.set_hair_colour)
@@ -237,8 +386,13 @@ func _on_global_server_list_pressed() -> void:
 		return
 
 	_clear_game_server_entries()
+	_selector_refresh_generation += 1
+	_selector_servers_snapshot = []
+	_selector_live_refresh_in_flight = false
 	game_server_status_label.text = "Loading available servers..."
 	game_server_dialog.popup_centered(Vector2i(620, 460))
+	if server_selector_refresh_timer:
+		server_selector_refresh_timer.start()
 
 	var url := BackendConfig.get_django_api_base_url() + "/game-servers"
 	var headers: PackedStringArray = [
@@ -293,6 +447,7 @@ func _ensure_game_server_dialog() -> void:
 func _clear_game_server_entries() -> void:
 	if not game_server_list_container:
 		return
+	_selector_room_labels.clear()
 	for child in game_server_list_container.get_children():
 		child.queue_free()
 
@@ -312,6 +467,7 @@ func _on_game_servers_response(result: int, response_code: int, headers: PackedS
 
 	var payload := json.data as Dictionary
 	var servers := payload.get("servers", []) as Array
+	_selector_servers_snapshot = servers.duplicate(true)
 	_clear_game_server_entries()
 
 	if servers.is_empty():
@@ -324,6 +480,8 @@ func _on_game_servers_response(result: int, response_code: int, headers: PackedS
 		if not (entry_value is Dictionary):
 			continue
 		_create_game_server_entry(entry_value as Dictionary)
+
+	call_deferred("_refresh_selector_live_room_counts", _selector_servers_snapshot, _selector_refresh_generation)
 
 func _create_all_servers_entry() -> void:
 	if not game_server_list_container:
@@ -379,40 +537,15 @@ func _create_game_server_entry(server_data: Dictionary) -> void:
 	text_col.add_child(name_label)
 
 	var details_label := Label.new()
-	var is_active_value: Variant = server_data.get("is_active", true)
-	var is_active: bool = true
-	if is_active_value is bool:
-		is_active = is_active_value
-	elif is_active_value is int:
-		is_active = (is_active_value as int) != 0
-	elif is_active_value is float:
-		is_active = (is_active_value as float) != 0.0
-	var status := "online" if is_active else "offline"
-
-	var current_rooms_value: Variant = server_data.get("current_rooms", 0)
-	var current_rooms: int = 0
-	if current_rooms_value is int:
-		current_rooms = current_rooms_value
-	elif current_rooms_value is bool:
-		current_rooms = 1 if (current_rooms_value as bool) else 0
-	elif current_rooms_value is float:
-		current_rooms = int(current_rooms_value as float)
-
-	var max_rooms_value: Variant = server_data.get("max_rooms", 0)
-	var max_rooms: int = 0
-	if max_rooms_value is int:
-		max_rooms = max_rooms_value
-	elif max_rooms_value is bool:
-		max_rooms = 1 if (max_rooms_value as bool) else 0
-	elif max_rooms_value is float:
-		max_rooms = int(max_rooms_value as float)
-
-	if max_rooms > 0:
-		details_label.text = "Region: %s   Status: %s   Rooms: %d/%d" % [region, status, current_rooms, max_rooms]
-	else:
-		details_label.text = "Region: %s   Status: %s   Rooms: %d" % [region, status, current_rooms]
+	var current_rooms := _variant_to_int(server_data.get("current_rooms", 0), 0)
+	var max_rooms := _variant_to_int(server_data.get("max_rooms", -1), -1)
+	_set_selector_details_text(details_label, server_data, current_rooms, max_rooms)
 	details_label.modulate = Color(1, 1, 1, 0.7)
 	text_col.add_child(details_label)
+
+	var server_id := str(server_data.get("id", ""))
+	if server_id != "":
+		_selector_room_labels[server_id] = details_label
 
 	var select_button := Button.new()
 	select_button.text = "Select"

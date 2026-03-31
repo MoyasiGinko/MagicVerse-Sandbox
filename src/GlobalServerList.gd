@@ -22,6 +22,7 @@ signal room_selected(room_id: String, room_data: Dictionary)
 var scroll_container: ScrollContainer
 var list_container: VBoxContainer
 var refresh_button: Button
+var capacity_label: Label
 @export var backend_path: NodePath = NodePath("../Backend")
 var backend: GlobalPlayMenuBackend
 var refresh_timer: Timer
@@ -105,8 +106,11 @@ func _ready() -> void:
 	backend = get_node_or_null(backend_path) as GlobalPlayMenuBackend
 	# Connect to backend rooms fetched
 	if backend and backend.has_signal("rooms_fetched"):
-		backend.rooms_fetched.connect(_on_rooms_fetched)
+		backend.rooms_fetched.connect(_on_backend_rooms_fetched)
 		print("[ServerList] Backend rooms_fetched signal connected")
+
+	# Live capacity banner for selected scope/server.
+	_ensure_capacity_banner()
 
 	# Create dedicated HTTPRequest for fetching rooms on demand
 	_http_refresh = HTTPRequest.new()
@@ -162,6 +166,7 @@ func refresh_server_list() -> void:
 	var selected_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
 	print("[ServerList] 🔄 refresh_server_list mode=", _scope_mode, " selected_id=", selected_id, " selected_api=", selected_api)
 	if _scope_mode == "all":
+		_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
 		_fetch_all_servers_rooms()
 		return
 
@@ -184,6 +189,7 @@ func refresh_server_list() -> void:
 		_pending_rooms_refresh = false
 		_active_specific_server_id = _requested_specific_server_id
 		_active_specific_server_api = server_api
+		_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
 		return
 	if err == ERR_BUSY:
 		_pending_rooms_refresh = true
@@ -195,12 +201,17 @@ func set_all_servers_mode() -> void:
 	_selected_server = {}
 	_active_specific_server_id = ""
 	_active_specific_server_api = ""
+	_set_capacity_text("Active Rooms: all servers", Color(1, 1, 1, 0.7))
 
 func set_specific_server_mode(server_data: Dictionary) -> void:
 	_scope_mode = "specific"
 	_selected_server = server_data.duplicate(true)
 	_pending_registry_refresh = false
 	_active_registry_scope = ""
+	# Clear stale entries immediately so previous scope/server rooms are not shown.
+	current_rooms.clear()
+	_populate_server_list([])
+	_set_capacity_text("Active Rooms: loading...", Color(1, 1, 1, 0.7))
 
 func is_all_servers_mode() -> bool:
 	return _scope_mode == "all"
@@ -227,10 +238,13 @@ func _fetch_all_servers_rooms() -> void:
 	if err != OK:
 		_show_error_state("Could not fetch server registry")
 
-func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
+func _fetch_rooms_for_server(server_data: Dictionary) -> Dictionary:
 	var api_url := _normalize_server_api_url(str(server_data.get("api_url", "")))
 	if api_url == "":
-		return []
+		return {
+			"rooms": [],
+			"server_capacity": {},
+		}
 
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
@@ -241,25 +255,41 @@ func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
 	var err := req.request(api_url + "/rooms", headers)
 	if err != OK:
 		req.queue_free()
-		return []
+		return {
+			"rooms": [],
+			"server_capacity": {},
+		}
 
 	var result_data: Array = await req.request_completed
 	req.queue_free()
 	if result_data.size() < 4:
-		return []
+		return {
+			"rooms": [],
+			"server_capacity": {},
+		}
 
 	var result: int = _variant_to_int(result_data[0], HTTPRequest.RESULT_CANT_CONNECT)
 	var response_code: int = _variant_to_int(result_data[1], 0)
 	var body := result_data[3] as PackedByteArray
 	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
-		return []
+		return {
+			"rooms": [],
+			"server_capacity": {},
+		}
 
 	var json := JSON.new()
 	if json.parse(body.get_string_from_utf8()) != OK or not (json.data is Dictionary):
-		return []
+		return {
+			"rooms": [],
+			"server_capacity": {},
+		}
 
 	var payload := json.data as Dictionary
 	var rooms := payload.get("rooms", []) as Array
+	var capacity: Variant = payload.get("server_capacity", {})
+	var capacity_dict: Dictionary = {}
+	if capacity is Dictionary:
+		capacity_dict = (capacity as Dictionary).duplicate(true)
 	var merged: Array = []
 	for room_value: Variant in rooms:
 		if not (room_value is Dictionary):
@@ -267,7 +297,10 @@ func _fetch_rooms_for_server(server_data: Dictionary) -> Array:
 		var room := (room_value as Dictionary).duplicate(true)
 		room["server"] = server_data
 		merged.append(room)
-	return merged
+	return {
+		"rooms": merged,
+		"server_capacity": capacity_dict,
+	}
 
 func _on_all_registry_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	if _active_registry_scope != "all" or _scope_mode != "all":
@@ -298,15 +331,38 @@ func _load_all_rooms_from_servers(servers: Array) -> void:
 		return
 
 	var all_rooms: Array = []
+	var aggregated_current_rooms: int = 0
+	var aggregated_max_rooms: int = 0
+	var has_known_max: bool = false
 	for server_value: Variant in servers:
 		if _scope_mode != "all":
 			return
 		if not (server_value is Dictionary):
 			continue
 		var server_data := server_value as Dictionary
-		var rooms_for_server: Array = await _fetch_rooms_for_server(server_data)
+		var fetch_result: Dictionary = await _fetch_rooms_for_server(server_data)
+		var rooms_for_server: Array = fetch_result.get("rooms", []) as Array
+		var capacity: Variant = fetch_result.get("server_capacity", {})
+		if capacity is Dictionary:
+			var capacity_dict := capacity as Dictionary
+			aggregated_current_rooms += _variant_to_int(capacity_dict.get("current_rooms", 0), 0)
+			var max_for_server := _variant_to_int(capacity_dict.get("max_rooms", -1), -1)
+			if max_for_server >= 0:
+				has_known_max = true
+				aggregated_max_rooms += max_for_server
 		for room_value: Variant in rooms_for_server:
 			all_rooms.append(room_value)
+
+	if has_known_max:
+		_set_capacity_text(
+			"Active Rooms: %d/%d (all servers)" % [aggregated_current_rooms, aggregated_max_rooms],
+			Color(1, 1, 1, 0.8),
+		)
+	else:
+		_set_capacity_text(
+			"Active Rooms: %d (all servers)" % [aggregated_current_rooms],
+			Color(1, 1, 1, 0.8),
+		)
 
 	if _scope_mode == "all":
 		_on_rooms_fetched(all_rooms)
@@ -354,6 +410,17 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 		return
 	var data := json.data as Dictionary
 	var rooms: Array = data.get("rooms", []) as Array
+	var server_capacity: Variant = data.get("server_capacity", {})
+	if server_capacity is Dictionary:
+		var cap := server_capacity as Dictionary
+		var current_rooms := _variant_to_int(cap.get("current_rooms", rooms.size()), rooms.size())
+		var max_rooms := _variant_to_int(cap.get("max_rooms", -1), -1)
+		if max_rooms >= 0:
+			_set_capacity_text("Active Rooms: %d/%d" % [current_rooms, max_rooms], Color(1, 1, 1, 0.8))
+		else:
+			_set_capacity_text("Active Rooms: %d" % [current_rooms], Color(1, 1, 1, 0.8))
+	else:
+		_set_capacity_text("Active Rooms: %d" % [rooms.size()], Color(1, 1, 1, 0.8))
 	_on_rooms_fetched(rooms)
 	if _pending_rooms_refresh:
 		_pending_rooms_refresh = false
@@ -361,11 +428,16 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 
 func _on_rooms_fetched(rooms: Array) -> void:
 	"""Handle rooms fetched from backend script"""
-	var sorted_rooms := rooms.duplicate(true)
+	var sorted_rooms: Array = rooms.duplicate(true) as Array
 	sorted_rooms.sort_custom(_sort_room_by_fill_desc)
 	print("[ServerList] 📥 Received ", sorted_rooms.size(), " rooms")
 	current_rooms = sorted_rooms
 	_populate_server_list(sorted_rooms)
+
+func _on_backend_rooms_fetched(rooms: Array) -> void:
+	# Room list updates are scope-aware via dedicated HTTP requests in this class.
+	# Ignore legacy backend push updates to avoid cross-server room bleed.
+	return
 
 func _sort_room_by_fill_desc(a: Variant, b: Variant) -> bool:
 	if not (a is Dictionary) or not (b is Dictionary):
@@ -564,6 +636,28 @@ func _show_error_state(error_message: String) -> void:
 	label.custom_minimum_size = Vector2(0, 100)
 	list_container.add_child(label)
 	print("[ServerList] ❌ Error message displayed to user: ", error_message)
+	_set_capacity_text("Active Rooms: unavailable", Color(1, 0.6, 0.6, 0.9))
+
+func _ensure_capacity_banner() -> void:
+	if capacity_label:
+		return
+	capacity_label = Label.new()
+	capacity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	capacity_label.modulate = Color(1, 1, 1, 0.7)
+	capacity_label.text = "Active Rooms: --"
+
+	if has_node("MainVBox"):
+		var main_vbox := get_node("MainVBox") as VBoxContainer
+		main_vbox.add_child(capacity_label)
+		main_vbox.move_child(capacity_label, 1)
+	else:
+		add_child(capacity_label)
+
+func _set_capacity_text(text: String, tint: Color = Color(1, 1, 1, 0.7)) -> void:
+	if not capacity_label:
+		return
+	capacity_label.text = text
+	capacity_label.modulate = tint
 
 func _on_room_join_clicked(room_id: String, room: Dictionary) -> void:
 	"""Handle room join button click"""
