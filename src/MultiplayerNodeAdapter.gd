@@ -12,6 +12,7 @@ signal rooms_list_changed  # New signal for room list changes
 signal peer_connected(peer_id: int)  # For multiplayer system integration
 signal peer_disconnected(peer_id: int)  # For multiplayer system integration
 signal peer_joined_with_name(peer_id: int, peer_name: String)  # For player list updates
+signal chat_received(peer_id: int, sender_name: String, text: String, created_at: String)
 
 var ws: WebSocketPeer = null
 var server_url: String = BackendConfig.get_node_ws_url()
@@ -98,6 +99,8 @@ func _on_ws_message() -> void:
 			_handle_peer_left(msg_data)
 		"player_state":
 			_handle_player_state(msg_data)
+		"chat":
+			_handle_chat(msg_data)
 		_:
 			push_warning("Unknown message type: " + str(msg_type))
 
@@ -167,6 +170,20 @@ func _handle_room_joined(data: Dictionary) -> void:
 	# Emit peer_connected signal for each connected peer (for Godot's multiplayer system)
 	for peer_id in _connected_peers:
 		peer_connected.emit(peer_id)
+
+	# Replay recent room chat so newly-joined users get synchronized context.
+	var chat_history: Array = data.get("chatHistory", []) as Array
+	for entry_value: Variant in chat_history:
+		if not (entry_value is Dictionary):
+			continue
+		var entry := entry_value as Dictionary
+		var from_peer: int = entry.get("from", 0) as int
+		var from_name: String = entry.get("fromName", "Unknown") as String
+		var text: String = entry.get("text", "") as String
+		var created_at: String = entry.get("createdAt", "") as String
+		if text.strip_edges() == "":
+			continue
+		chat_received.emit(from_peer, from_name, text, created_at)
 
 	room_joined.emit(_peer_id, _room_id)
 
@@ -622,7 +639,7 @@ func _handle_player_state(data: Dictionary) -> void:
 	var player_node: Node = world.get_node_or_null(str(peer_id))
 	if not player_node:
 		# Recover from missed/jittered join events by spawning remote player lazily.
-		var recovered_name := "Unknown"
+		var recovered_name: String = "Unknown"
 		for member_data: Variant in room_members:
 			if typeof(member_data) == TYPE_DICTIONARY and (member_data as Dictionary).get("peerId", -1) as int == peer_id:
 				recovered_name = (member_data as Dictionary).get("name", "Unknown") as String
@@ -689,6 +706,15 @@ func _handle_player_state(data: Dictionary) -> void:
 					player.animator["parameters/BlendSit/blend_amount"] = anim_data.get("blend_sit", 0.0)
 		else:
 			pass
+
+func _handle_chat(data: Dictionary) -> void:
+	var from_peer: int = int(data.get("from", 0) as float)
+	var from_name: String = data.get("fromName", "Unknown") as String
+	var text: String = data.get("text", "") as String
+	var created_at: String = data.get("createdAt", "") as String
+	if text.strip_edges() == "":
+		return
+	chat_received.emit(from_peer, from_name, text, created_at)
 
 func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3, anim_state: int, anim_data: Dictionary) -> void:
 	"""Send local player state to server (position, rotation, velocity, animation state, animation blends)"""
