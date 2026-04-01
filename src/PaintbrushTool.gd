@@ -74,5 +74,12 @@ func _process(delta : float) -> void:
 					brick = m_3d["collider"].get_parent() as Brick
 
 				if brick != null:
-					# Allow any client to call RPC on a brick (server will sync to others)
-					brick.set_colour.rpc(colours[_selected_colour_idx])
+					var selected_colour: Color = colours[_selected_colour_idx]
+					var adapter := _get_node_adapter()
+					if adapter != null:
+						# Node backend path: broadcast paint effect by brick path.
+						adapter.send_rpc_call("remote_paint_brick", [str(brick.get_path()), selected_colour.to_html(false)])
+						brick.set_colour(selected_colour)
+					else:
+						# ENet path.
+						brick.set_colour.rpc(selected_colour)

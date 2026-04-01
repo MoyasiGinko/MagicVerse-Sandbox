@@ -302,6 +302,14 @@ func remote_delete_tbw(obj_path : String, despawn : bool = false) -> void:
 	else:
 		node.queue_free()
 
+func remote_paint_brick(obj_path : String, colour_html : String) -> void:
+	var node := get_node_or_null(obj_path)
+	if node == null:
+		return
+	if not (node is Brick):
+		return
+	(node as Brick).set_colour(Color(colour_html))
+
 func _find_tool_for_player(peer_id : int, tool_node_name : String, tool_label : String) -> Tool:
 	var player: RigidPlayer = get_node_or_null(str(peer_id)) as RigidPlayer
 	if player == null:
