@@ -36,7 +36,7 @@ func _on_request_completed(result : int, response_code : int, headers : PackedSt
 	if json.has("name"):
 		# if we are not running latest version
 		if str(json["name"]) != get_tree().current_scene.display_version:
-			visible = true
+			visible = false
 			self_modulate = Color(35.0, 6.0, 0.0, 1.0)
 			text = str(JsonHandler.find_entry_in_file("ui/update_available"), json["name"])
 			if json.has("body"):

@@ -79,7 +79,7 @@ adjustment_color_correction = SubResource("GradientTexture2D_y3nqn")
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_lfavo"]
 resource_name = "vincent.jacket"
 vertex_color_use_as_albedo = true
-albedo_color = Color(0.42899996, 0.65, 0.4474166, 1)
+albedo_color = Color(0.49425453, 0.5955004, 0.7498966, 1)
 albedo_texture = ExtResource("5_fo7yy")
 roughness_texture = ExtResource("7_i7sjw")
 roughness_texture_channel = 4
