@@ -30,11 +30,11 @@ func _init(_ffa : bool) -> void:
 		gamemode_name = "Team Home Run"
 		gamemode_subtitle = "Knock other players off the map with your bat! Watch out for friendly fire."
 
-func start(_params : Array, _mods : Array) -> void:
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	if _params.size() > 1:
 		# bat knockback is param 2
 		bat_knockback = _params[1]
-	super(_params, _mods)
+	super(_params, _mods, force_local)
 
 # runs as server
 # Override default deathmatch params.

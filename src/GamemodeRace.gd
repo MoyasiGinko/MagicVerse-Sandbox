@@ -31,8 +31,8 @@ func _init(_ffa : bool) -> void:
 		gamemode_name = "Team Race"
 		gamemode_subtitle = "Race to the finish line with your team!"
 
-func start(_params : Array, _mods : Array) -> void:
-	super(_params, _mods)
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
+	super(_params, _mods, force_local)
 
 # runs as server
 # Override default deathmatch params.
@@ -43,7 +43,7 @@ func run() -> void:
 	if !multiplayer.is_server(): return
 	# wait for super method (camera preview)
 	await super()
-	
+
 	# run start events
 	Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
 	if !ffa:

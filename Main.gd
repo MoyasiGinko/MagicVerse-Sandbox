@@ -1098,6 +1098,26 @@ func _load_world_and_start(map_name: String) -> void:
 		else:
 			print("[Main] ⚠️ PlayerList not found or missing method")
 	_refresh_member_lists()
+	_apply_pending_node_gamemode_state()
+
+func _apply_pending_node_gamemode_state() -> void:
+	if not Global.has_meta("pending_active_gamemode"):
+		return
+	var pending: Variant = Global.get_meta("pending_active_gamemode")
+	if not (pending is Dictionary):
+		Global.remove_meta("pending_active_gamemode")
+		return
+	var gm := pending as Dictionary
+	var idx: int = int(gm.get("index", -1) as float)
+	if idx < 0:
+		Global.remove_meta("pending_active_gamemode")
+		return
+	var params: Array = gm.get("params", []) as Array
+	var mods: Array = gm.get("mods", []) as Array
+	var started_at_ms: int = int(gm.get("startedAtMs", 0) as float)
+	print("[Main] 🎮 Replaying active room gamemode idx=", idx)
+	$World.remote_start_gamemode(idx, params, mods, started_at_ms)
+	Global.remove_meta("pending_active_gamemode")
 
 func _refresh_member_lists() -> void:
 	var game_list: Node = get_node_or_null("GameCanvas/PlayerList")

@@ -32,7 +32,7 @@ func _ready() -> void:
 	buttons.append(get_node("VBoxContainer/GridContainer/Opt4"))
 	buttons.append(get_node("VBoxContainer/GridContainer/Replay"))
 	buttons.append(get_node("VBoxContainer/GridContainer/Sandbox"))
-	
+
 	vote_timer = Timer.new()
 	vote_timer.wait_time = 20
 	vote_timer.one_shot = true
@@ -66,7 +66,7 @@ func update_timer() -> void:
 # Send timer update to peers
 @rpc("any_peer", "call_local", "reliable")
 func update_timer_rpc(time : int) -> void:
-	get_node("VBoxContainer/HBoxContainer/Timer").text = str(time, "s") 
+	get_node("VBoxContainer/HBoxContainer/Timer").text = str(time, "s")
 
 @rpc("any_peer", "call_local", "reliable")
 func on_voting_ended_rpc() -> void:
@@ -83,6 +83,9 @@ func _on_vote_timeout() -> void:
 	for i in 6:
 		if votes[i] > votes[highest_vote]:
 			highest_vote = i
+	# If a map option was selected but there are fewer than 4 map entries, fall back safely.
+	if highest_vote < 4 and highest_vote >= maps.size():
+		highest_vote = 0 if maps.size() > 0 else 5
 	# for 1-4, choose map
 	# for 5, reload map and restart last gamemode
 	# for 6, enter sandbox (do nothing)
@@ -102,7 +105,7 @@ func _on_vote_timeout() -> void:
 				player.protect_spawn()
 			# get map based on ID
 			var map_id : int = maps[highest_vote]["id"]
-			
+
 			# built-in
 			if map_id == -1:
 				Global.get_world().open_tbw(Global.get_tbw_lines(str(maps[highest_vote]["name"])))
@@ -131,12 +134,12 @@ func _switch_map(result : int, response_code : int, headers : PackedStringArray,
 func _maps_request_completed(result : int, response_code : int, headers : PackedStringArray, body : PackedByteArray) -> void:
 	if (response_code != 200):
 		return
-	
+
 	vote_timer.wait_time = 20
 	vote_timer.one_shot = true
 	vote_timer.start()
 	update_timer()
-	
+
 	var json := JSON.new()
 	json.parse(body.get_string_from_utf8())
 	var response : Variant = json.get_data()
@@ -150,15 +153,18 @@ func _maps_request_completed(result : int, response_code : int, headers : Packed
 		"Quarry Quarrel",
 		"Perilous Platforms",
 		"Slapdash Central"]
-	
+
 	for i in 2:
 		var map_name : String = built_in_maps.pick_random()
 		maps.append({"name": map_name, "id": -1, "image": "-1", "author": "Tinybox"})
 		# pop from array pool
 		built_in_maps.pop_at(built_in_maps.find(map_name))
 	if response is Array:
+		var response_maps : Array = (response as Array).duplicate()
 		for i in 2:
-			var r : Variant = response.pick_random()
+			if response_maps.is_empty():
+				break
+			var r : Variant = response_maps.pick_random()
 			if r is Dictionary:
 				var map_name := "(no name)"
 				var id : int = -1
@@ -173,16 +179,28 @@ func _maps_request_completed(result : int, response_code : int, headers : Packed
 					id = r["id"] as int
 				maps.append({"name": map_name, "id": id, "image": image, "author": author})
 			# pop from array pool
-			response.pop_at(response.find(r))
+			response_maps.pop_at(response_maps.find(r))
+	while maps.size() < 4 and not built_in_maps.is_empty():
+		var fallback_name : String = built_in_maps.pick_random()
+		maps.append({"name": fallback_name, "id": -1, "image": "-1", "author": "Tinybox"})
+		built_in_maps.pop_at(built_in_maps.find(fallback_name))
 	show_panel.rpc(maps)
 
 @rpc("any_peer", "call_local", "reliable")
 func show_panel(maps : Array) -> void:
 	player_votes = {}
 	update_player_votes.rpc(player_votes)
-	
+
 	visible = true
+	var map_count : int = mini(4, maps.size())
 	for i in 4:
+		if i >= map_count:
+			buttons[i].disabled = true
+			buttons[i].get_node("Split/Labels/Title").text = "Unavailable"
+			buttons[i].get_node("Split/Labels/Author").text = ""
+			buttons[i].get_node("Split/Image").texture = null
+			continue
+		buttons[i].disabled = false
 		buttons[i].get_node("Split/Labels/Title").text = maps[i]["name"]
 		buttons[i].get_node("Split/Labels/Author").text = str("by ", maps[i]["author"])
 		buttons[i].connect("pressed", _on_vote.bind(i))
@@ -200,7 +218,7 @@ func show_panel(maps : Array) -> void:
 			buttons[i].get_node("Split/Image").texture = tex
 	buttons[4].connect("pressed", _on_vote.bind(4))
 	buttons[5].connect("pressed", _on_vote.bind(5))
-	
+
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 func _on_vote(idx : int) -> void:

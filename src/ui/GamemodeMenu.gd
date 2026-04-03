@@ -26,6 +26,15 @@ var gamemode_names_list : Array = []
 var selected_mode_params : Array = []
 var selected_mode_mods : Array = []
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
 func _ready() -> void:
 	super()
 	# automatically populate gamemode list based on map
@@ -36,6 +45,12 @@ func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
 
 func _on_start_gamemode_pressed() -> void:
+	var adapter := _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		var started_at_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+		Global.server_start_gamemode(selector.selected, selected_mode_params, selected_mode_mods)
+		adapter.send_rpc_call("remote_start_gamemode", [selector.selected, selected_mode_params, selected_mode_mods, started_at_ms])
+		return
 	Global.server_start_gamemode.rpc_id(1, selector.selected, selected_mode_params, selected_mode_mods)
 
 func _on_peer_connected(id : int) -> void:
@@ -44,9 +59,16 @@ func _on_peer_connected(id : int) -> void:
 	_populate_client_gamemode_list.rpc_id(id, gamemode_names_list)
 
 func _on_end_gamemode_pressed() -> void:
-	if !multiplayer.is_server(): return
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		if !adapter.is_server():
+			return
+	else:
+		if !multiplayer.is_server(): return
 	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])
 	e.start()
+	if adapter != null:
+		adapter.send_rpc_call("remote_end_gamemode", [])
 
 func _on_tbw_loaded() -> void:
 	# server handles

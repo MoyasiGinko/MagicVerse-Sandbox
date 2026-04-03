@@ -24,11 +24,11 @@ func _init() -> void:
 	gamemode_name = "Hide & Seek"
 	gamemode_subtitle = "Seekers chase down the Hiders. If the Seekers hit a Hider with their bat, they become a Seeker."
 
-func start(_params : Array, _mods : Array) -> void:
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	if _params.size() > 1:
 		# seeker starting amount (param 2)
 		seeker_amt = _params[1]
-	super(_params, _mods)
+	super(_params, _mods, force_local)
 
 # runs as server
 func set_run_parameters(p : RigidPlayer) -> void:
@@ -42,10 +42,10 @@ func run() -> void:
 	if !multiplayer.is_server(): return
 	# wait for super method (camera preview)
 	await super()
-	
+
 	# set camera max zoom distance
 	Global.set_camera_max_dist.rpc(8)
-	
+
 	var others : Array = Global.get_world().rigidplayer_list.duplicate()
 	var seekers : Array = []
 	# pick random player to be Seeker
@@ -76,9 +76,9 @@ func run() -> void:
 	# add hider death penalty after seeker has been released
 	for player : RigidPlayer in others:
 		player.connect("died", _on_hider_death.bind(player))
-	
+
 	# end watchers
-	
+
 	# in case ended during start events being run
 	if running:
 		# setup watchers

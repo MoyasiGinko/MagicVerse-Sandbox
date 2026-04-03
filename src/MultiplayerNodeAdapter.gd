@@ -171,6 +171,13 @@ func _handle_room_joined(data: Dictionary) -> void:
 	for peer_id in _connected_peers:
 		peer_connected.emit(peer_id)
 
+	var active_gamemode: Variant = data.get("activeGamemode", null)
+	if active_gamemode is Dictionary:
+		Global.set_meta("pending_active_gamemode", (active_gamemode as Dictionary).duplicate(true))
+	else:
+		if Global.has_meta("pending_active_gamemode"):
+			Global.remove_meta("pending_active_gamemode")
+
 	# Replay recent room chat so newly-joined users get synchronized context.
 	var chat_history: Array = data.get("chatHistory", []) as Array
 	for entry_value: Variant in chat_history:

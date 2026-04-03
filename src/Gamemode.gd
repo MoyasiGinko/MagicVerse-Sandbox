@@ -23,21 +23,24 @@ var mods : Array
 var gamemode_name := "Gamemode"
 var gamemode_subtitle := "A new gamemode has been started!"
 var running := false
+var _force_local_sync : bool = false
 # defaults to 600 seconds or 10 mins
 var time_limit_seconds : int = 600
 @onready var game_timer : Timer = Timer.new()
 @onready var timer_ui : GameTimer = get_tree().current_scene.get_node("GameCanvas/Timer") as ProgressBar
 @onready var vote_panel : VotePanel = get_tree().current_scene.get_node("GameCanvas/VotePanel") as VotePanel
 
-func start(_params : Array, _mods : Array) -> void:
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	# only server starts games
-	if !multiplayer.is_server(): return
+	_force_local_sync = force_local
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# make sure if someone joins mid-game the properties sync
-	multiplayer.peer_connected.connect(_on_peer_connected)
-	
+	if multiplayer.is_server():
+		multiplayer.peer_connected.connect(_on_peer_connected)
+
 	params = _params
 	mods = _mods
-	
+
 	print(get_multiplayer_authority(), " - Started gamemode: ", gamemode_name, " with params ", params, " and modifiers ", mods)
 	# clear player inventories
 	for p : RigidPlayer in Global.get_world().rigidplayer_list:
@@ -62,30 +65,44 @@ func _on_peer_connected(id : int) -> void:
 		timer_ui.set_max_val_rpc.rpc_id(id, time_limit_seconds)
 
 func set_parameters(p : RigidPlayer) -> void:
-	p.get_tool_inventory().delete_all_tools.rpc()
-	if mods.size() > 0:
-		p.set_move_speed.rpc(mods[0] as float)
-	if mods.size() > 1:
-		# set player health as server
-		p.set_max_health(mods[1] as int)
-		# fill the health
-		p.set_health(p.max_health as int)
-	if mods.size() > 2:
-		# jump force is a multiplier
-		p.set_jump_force.rpc(2.4 * mods[2] as float)
-	if mods.size() > 3:
-		# set low gravity toggle to on
-		Global.get_world().get_current_map().set_gravity.rpc(mods[3] as bool)
+	if _force_local_sync:
+		p.get_tool_inventory().delete_all_tools()
+		if mods.size() > 0:
+			p.set_move_speed(mods[0] as float)
+		if mods.size() > 1:
+			# set player health locally
+			p.set_max_health(mods[1] as int)
+			p.set_health(p.max_health as int)
+		if mods.size() > 2:
+			# jump force is a multiplier
+			p.set_jump_force(2.4 * mods[2] as float)
+		if mods.size() > 3:
+			Global.get_world().get_current_map().set_gravity(mods[3] as bool)
+	else:
+		p.get_tool_inventory().delete_all_tools.rpc()
+		if mods.size() > 0:
+			p.set_move_speed.rpc(mods[0] as float)
+		if mods.size() > 1:
+			# set player health as server
+			p.set_max_health(mods[1] as int)
+			# fill the health
+			p.set_health(p.max_health as int)
+		if mods.size() > 2:
+			# jump force is a multiplier
+			p.set_jump_force.rpc(2.4 * mods[2] as float)
+		if mods.size() > 3:
+			# set low gravity toggle to on
+			Global.get_world().get_current_map().set_gravity.rpc(mods[3] as bool)
 
 func set_run_parameters(p : RigidPlayer) -> void:
 	pass
 
 func run() -> void:
 	# only server starts games
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	var preview_event : Event = Event.new(Event.EventType.SHOW_WORLD_PREVIEW, [gamemode_name, gamemode_subtitle])
 	await preview_event.start()
-	
+
 	running = true
 	# start default timer
 	game_timer.one_shot = true
@@ -94,12 +111,24 @@ func run() -> void:
 	add_child(game_timer)
 	game_timer.start()
 	if timer_ui != null:
-		timer_ui.set_visible_rpc.rpc(true)
-		timer_ui.set_max_val_rpc.rpc(time_limit_seconds)
+		if _force_local_sync:
+			timer_ui.set_visible_rpc(true)
+			timer_ui.set_max_val_rpc(time_limit_seconds)
+		else:
+			timer_ui.set_visible_rpc.rpc(true)
+			timer_ui.set_max_val_rpc.rpc(time_limit_seconds)
 		update_timer()
 
 func update_timer() -> void:
-	timer_ui.update_timer.rpc(gamemode_name, game_timer.time_left)
+	if _force_local_sync:
+		var timer_text : Label = timer_ui.get_node_or_null("Label")
+		if timer_text != null:
+			var mins := str(int(game_timer.time_left as int / 60))
+			var seconds := str('%02d' % (int(game_timer.time_left as int) % 60))
+			timer_text.text = str(gamemode_name, " - ", mins, ":", seconds)
+			timer_ui.value = game_timer.time_left
+	else:
+		timer_ui.update_timer.rpc(gamemode_name, game_timer.time_left)
 	# update every 1s
 	await get_tree().create_timer(1).timeout
 	if running:
@@ -107,22 +136,35 @@ func update_timer() -> void:
 
 func end(params : Array) -> void:
 	# only server ends games
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	print(get_multiplayer_authority(), " - Ended gamemode: ", gamemode_name)
 	# cleanup and run any final stuff
 	for p : RigidPlayer in Global.get_world().rigidplayer_list:
-		p.get_tool_inventory().reset.rpc()
+		if _force_local_sync:
+			p.get_tool_inventory().reset()
+		else:
+			p.get_tool_inventory().reset.rpc()
 		# reset player stuff
 		p.set_max_health(20)
-		p.set_move_speed.rpc(5)
-		p.set_jump_force.rpc(2.4)
+		if _force_local_sync:
+			p.set_move_speed(5)
+			p.set_jump_force(2.4)
+		else:
+			p.set_move_speed.rpc(5)
+			p.set_jump_force.rpc(2.4)
 		# reset map gravity, in case it changed
-		Global.get_world().get_current_map().set_gravity.rpc(false)
+		if _force_local_sync:
+			Global.get_world().get_current_map().set_gravity(false)
+		else:
+			Global.get_world().get_current_map().set_gravity.rpc(false)
 	# never free gamemodes because they are saved as part of the world
 	emit_signal("gamemode_ended")
 	running = false
 	if timer_ui != null:
-		timer_ui.set_visible_rpc.rpc(false)
+		if _force_local_sync:
+			timer_ui.set_visible_rpc(false)
+		else:
+			timer_ui.set_visible_rpc.rpc(false)
 	# stop timer
 	if game_timer.is_connected("timeout", end.bind([])):
 		game_timer.disconnect("timeout", end.bind([]))
@@ -130,3 +172,4 @@ func end(params : Array) -> void:
 	# show vote screen
 	# only runs as server
 	vote_panel.start_voting()
+	_force_local_sync = false

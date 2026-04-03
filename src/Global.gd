@@ -445,21 +445,23 @@ func set_camera_max_dist(new : float = 40) -> void:
 		camera.set_max_dist(new)
 
 @rpc("any_peer", "call_local", "reliable")
-func server_start_gamemode(idx : int, params : Array, mods : Array) -> void:
+func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false) -> void:
 	for gm : Gamemode in get_world().gamemode_list:
 		if gm.running:
-			UIHandler.show_alert.rpc_id(multiplayer.get_remote_sender_id(), "Can't start a new gamemode while one is currently running!", 6, false, UIHandler.alert_colour_error)
+			if not force_local:
+				UIHandler.show_alert.rpc_id(multiplayer.get_remote_sender_id(), "Can't start a new gamemode while one is currently running!", 6, false, UIHandler.alert_colour_error)
 			return
 
 	if get_world().gamemode_list.size() > 0:
 		get_world().gamemode_list[idx].connect("gamemode_ended", _on_gamemode_ended.bind(idx))
-		get_world().gamemode_list[idx].start(params, mods)
+		get_world().gamemode_list[idx].start(params, mods, force_local)
 
 		last_gamemode_idx = idx
 		last_gamemode_params = params
 		last_gamemode_mods = mods
 	else:
-		UIHandler.show_alert.rpc_id(multiplayer.get_remote_sender_id(), "There are no gamemodes to start!")
+		if not force_local:
+			UIHandler.show_alert.rpc_id(multiplayer.get_remote_sender_id(), "There are no gamemodes to start!")
 
 func _on_gamemode_ended(idx : int) -> void:
 	if get_world().gamemode_list[idx].is_connected("gamemode_ended", _on_gamemode_ended.bind(idx)):

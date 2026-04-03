@@ -34,22 +34,22 @@ func _init(_ffa : bool) -> void:
 		gamemode_name = "Team Capture"
 		gamemode_subtitle = "As a team, capture and hold a point to win!"
 
-func start(_params : Array, _mods : Array) -> void:
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	# only server starts games
 	if !multiplayer.is_server(): return
-	
+
 	if _params.size() > 1:
 		# capture time limit is default 60s
 		capture_time_limit = _params[1]
-	
+
 	# get all capture points in world
 	for c in Global.get_world().get_children():
 		if c is CapturePoint:
 			capture_points.append(c)
 			print(str("Capture Point added: ", c, "."))
 			c.set_visible_rpc.rpc(true)
-	
-	super(_params, _mods)
+
+	super(_params, _mods, force_local)
 
 # Sync parameters on player join.
 func _on_peer_connected(id : int) -> void:
@@ -69,7 +69,7 @@ func run() -> void:
 	if !multiplayer.is_server(): return
 	# wait for super method (camera preview)
 	await super()
-	
+
 	# run start events
 	Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
 	for p : RigidPlayer in Global.get_world().rigidplayer_list:
@@ -96,10 +96,10 @@ func run() -> void:
 func end(args : Array) -> void:
 	# only server ends games
 	if !multiplayer.is_server(): return
-	
+
 	for c in capture_points:
 		c.set_visible_rpc.rpc(false)
-	
+
 	if args.is_empty():
 		# free for all determinant
 		if ffa:

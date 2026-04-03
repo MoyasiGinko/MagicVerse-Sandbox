@@ -30,11 +30,11 @@ func _init(_ffa : bool) -> void:
 		gamemode_name = "Team Balls!!!"
 		gamemode_subtitle = "Balls."
 
-func start(_params : Array, _mods : Array) -> void:
+func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	if _params.size() > 1:
 		# ball cooldown is param 2
 		ball_cooldown = _params[1]
-	super(_params, _mods)
+	super(_params, _mods, force_local)
 
 # runs as server
 # Override default deathmatch params.

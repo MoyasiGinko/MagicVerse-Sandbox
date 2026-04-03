@@ -302,6 +302,16 @@ func remote_delete_tbw(obj_path : String, despawn : bool = false) -> void:
 	else:
 		node.queue_free()
 
+func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = [], _started_at_ms : int = 0) -> void:
+	var idx_int := _to_int(idx)
+	if idx_int < 0 or idx_int >= gamemode_list.size():
+		return
+	Global.server_start_gamemode(idx_int, params, mods, true)
+
+func remote_end_gamemode() -> void:
+	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])
+	e.start()
+
 func remote_paint_brick(obj_path : String, colour_html : String) -> void:
 	var node := get_node_or_null(obj_path)
 	if node == null:
