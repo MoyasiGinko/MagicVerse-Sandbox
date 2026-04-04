@@ -217,20 +217,21 @@ func load_appearance() -> void:
 func get_world() -> World:
 	return get_tree().current_scene.get_node("World")
 
+func get_node_adapter() -> MultiplayerNodeAdapter:
+	var root: Node = get_tree().root
+	if root.has_meta("node_adapter"):
+		return root.get_meta("node_adapter") as MultiplayerNodeAdapter
+	for child: Node in root.get_children():
+		if child.has_meta("node_adapter"):
+			return child.get_meta("node_adapter") as MultiplayerNodeAdapter
+	return null
+
 # Returns this authority's Player.
 func get_player() -> RigidPlayer:
 	if connected_to_server:
 		var local_id : int = multiplayer.get_unique_id()
 		# If using Node backend, prefer adapter peer id
-		var root: Node = get_tree().root
-		var adapter: MultiplayerNodeAdapter = null
-		if root.has_meta("node_adapter"):
-			adapter = root.get_meta("node_adapter") as MultiplayerNodeAdapter
-		else:
-			for child: Node in root.get_children():
-				if child.has_meta("node_adapter"):
-					adapter = child.get_meta("node_adapter") as MultiplayerNodeAdapter
-					break
+		var adapter: MultiplayerNodeAdapter = get_node_adapter()
 		if adapter != null:
 			local_id = adapter.get_unique_peer_id()
 		return get_world().get_node_or_null(str(local_id))
@@ -445,7 +446,7 @@ func set_camera_max_dist(new : float = 40) -> void:
 		camera.set_max_dist(new)
 
 @rpc("any_peer", "call_local", "reliable")
-func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false) -> void:
+func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false, started_at_ms : int = 0) -> void:
 	for gm : Gamemode in get_world().gamemode_list:
 		if gm.running:
 			if not force_local:
@@ -453,8 +454,18 @@ func server_start_gamemode(idx : int, params : Array, mods : Array, force_local 
 			return
 
 	if get_world().gamemode_list.size() > 0:
+		if force_local and started_at_ms > 0:
+			set_meta("pending_active_gamemode_started_at_ms", started_at_ms)
+		elif has_meta("pending_active_gamemode_started_at_ms"):
+			remove_meta("pending_active_gamemode_started_at_ms")
 		get_world().gamemode_list[idx].connect("gamemode_ended", _on_gamemode_ended.bind(idx))
 		get_world().gamemode_list[idx].start(params, mods, force_local)
+
+		if not force_local:
+			var adapter: MultiplayerNodeAdapter = get_node_adapter()
+			if adapter != null and adapter.is_server():
+				var started_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+				adapter.send_rpc_call("remote_start_gamemode", [idx, params, mods, started_ms])
 
 		last_gamemode_idx = idx
 		last_gamemode_params = params

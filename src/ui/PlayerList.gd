@@ -51,6 +51,7 @@ func refresh_from_adapter() -> void:
 		adapter.peer_joined_with_name.connect(_on_peer_joined_node)
 		adapter.peer_connected.connect(_on_peer_connected_node)
 		adapter.peer_disconnected.connect(_on_peer_left_node)
+		adapter.host_changed.connect(_on_host_changed_node)
 		_adapter_hooked = true
 	_remove_duplicate_entries()
 	_populate_from_adapter(adapter)
@@ -142,13 +143,22 @@ func add_player(player : RigidPlayer) -> void:
 	sort_by_teams()
 
 # Add player from server room data (for Node backend multiplayer)
-func add_player_from_server(peer_id: int, player_name: String, team: int = 0) -> void:
+func add_player_from_server(peer_id: int, player_name: String, team: int = 0, is_host: bool = false) -> void:
 	print("[PlayerList] 👥 Adding player from server: peer_id=", peer_id, " name=", player_name)
 
 	for l in get_children():
 		# if we're already in the list, dont add
 		if l.name == str(peer_id):
-			print("[PlayerList] ⚠️ Player already in list, skipping")
+			var existing_label: Label = l.get_node_or_null("HBoxContainer/Label")
+			var crown: CanvasItem = l.get_node_or_null("HBoxContainer/Crown")
+			var you_tag: CanvasItem = l.get_node_or_null("HBoxContainer/You")
+			if existing_label:
+				existing_label.text = player_name
+			if crown:
+				crown.visible = is_host
+			if you_tag:
+				you_tag.visible = (not is_host) and (player_name == Global.display_name)
+			print("[PlayerList] 🔄 Player already exists, updated host/name tags")
 			return
 		# guard against duplicate display names for same peer
 		var label: Label = l.get_node_or_null("HBoxContainer/Label")
@@ -183,8 +193,8 @@ func add_player_from_server(peer_id: int, player_name: String, team: int = 0) ->
 	# make the name of the object equal to peer id
 	player_list_entry_i.name = str(peer_id)
 
-	# if peer 1, show the crown (host)
-	if peer_id == 1:
+	# show crown for current host peer
+	if is_host:
 		player_list_entry_i.get_node("HBoxContainer/Crown").visible = true
 	# show "YOU" tag for ourselves
 	elif player_name == Global.display_name:
@@ -219,12 +229,16 @@ func _remove_player_entry_by_id(peer_id: int) -> void:
 			l.queue_free()
 
 func _on_peer_joined_node(peer_id: int, peer_name: String) -> void:
-	add_player_from_server(peer_id, peer_name, 0)
 	var adapter := _get_node_adapter()
 	if adapter != null:
 		_populate_from_adapter(adapter)
 
 func _on_peer_connected_node(_peer_id: int) -> void:
+	var adapter := _get_node_adapter()
+	if adapter != null:
+		_populate_from_adapter(adapter)
+
+func _on_host_changed_node(_new_host_peer_id: int, _is_me_host: bool) -> void:
 	var adapter := _get_node_adapter()
 	if adapter != null:
 		_populate_from_adapter(adapter)
@@ -242,9 +256,10 @@ func _populate_from_adapter(adapter: MultiplayerNodeAdapter) -> void:
 			var peer_dict: Dictionary = peer_data as Dictionary
 			var peer_id_val: int = peer_dict.get("peerId", 0) as int
 			var peer_name: String = peer_dict.get("name", "Unknown") as String
+			var is_host: bool = peer_dict.get("is_host", false) as bool
 			if peer_id_val <= 0:
 				continue
-			add_player_from_server(peer_id_val, peer_name, 0)
+			add_player_from_server(peer_id_val, peer_name, 0, is_host)
 
 func _get_node_adapter() -> MultiplayerNodeAdapter:
 	var root: Node = get_tree().root

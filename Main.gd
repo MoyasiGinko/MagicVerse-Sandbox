@@ -668,6 +668,7 @@ func leave_server() -> void:
 func _cleanup_node_multiplayer_state() -> void:
 	"""Close and dispose Node adapter state to prevent stale room/session reuse."""
 	if node_peer != null:
+		node_peer.leave_room()
 		node_peer.close()
 		if is_instance_valid(node_peer):
 			node_peer.queue_free()

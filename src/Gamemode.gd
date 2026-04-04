@@ -43,12 +43,26 @@ func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 
 	print(get_multiplayer_authority(), " - Started gamemode: ", gamemode_name, " with params ", params, " and modifiers ", mods)
 	# clear player inventories
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for p_value: Variant in players_snapshot:
+		if p_value == null or !is_instance_valid(p_value):
+			continue
+		if not (p_value is RigidPlayer):
+			continue
+		var p: RigidPlayer = p_value as RigidPlayer
 		set_parameters(p)
 	if params.size() > 0:
 		# the time limit chooser is in minutes but this is in
 		# seconds so we convert
 		time_limit_seconds = params[0] * 60
+	if _force_local_sync and Global.has_meta("pending_active_gamemode_started_at_ms"):
+		var started_var: Variant = Global.get_meta("pending_active_gamemode_started_at_ms")
+		var started_at_ms: int = int(started_var as float)
+		if started_at_ms > 0:
+			var now_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+			var elapsed_secs: int = maxi(0, int((now_ms - started_at_ms) / 1000))
+			time_limit_seconds = maxi(1, time_limit_seconds - elapsed_secs)
+		Global.remove_meta("pending_active_gamemode_started_at_ms")
 	run()
 
 # Sync parameters on player join.
@@ -65,6 +79,8 @@ func _on_peer_connected(id : int) -> void:
 		timer_ui.set_max_val_rpc.rpc_id(id, time_limit_seconds)
 
 func set_parameters(p : RigidPlayer) -> void:
+	if p == null or !is_instance_valid(p):
+		return
 	if _force_local_sync:
 		p.get_tool_inventory().delete_all_tools()
 		if mods.size() > 0:
@@ -96,6 +112,57 @@ func set_parameters(p : RigidPlayer) -> void:
 
 func set_run_parameters(p : RigidPlayer) -> void:
 	pass
+
+func _clear_leaderboard_local() -> void:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for player_value: Variant in players_snapshot:
+		if player_value == null or !is_instance_valid(player_value):
+			continue
+		if not (player_value is RigidPlayer):
+			continue
+		var player: RigidPlayer = player_value as RigidPlayer
+		player.update_kills(0)
+		player.update_deaths(0)
+		player.update_capture_time(-1)
+		player.update_checkpoint(0)
+
+func _balance_teams_local() -> void:
+	var teams : Teams = Global.get_world().get_current_map().get_teams()
+	var participants : Array = Global.get_world().rigidplayer_list.duplicate()
+	for i : int in range(participants.size()):
+		var player_value: Variant = participants[i]
+		if player_value == null or !is_instance_valid(player_value):
+			continue
+		if not (player_value is RigidPlayer):
+			continue
+		var player: RigidPlayer = player_value as RigidPlayer
+		if (i % 2) == 0:
+			player.update_team(str(teams.get_team_list()[1].name))
+		else:
+			player.update_team(str(teams.get_team_list()[2].name))
+		player.update_info(player.get_multiplayer_authority())
+
+func _move_all_players_to_spawn_local() -> void:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for player_value: Variant in players_snapshot:
+		if player_value == null or !is_instance_valid(player_value):
+			continue
+		if not (player_value is RigidPlayer):
+			continue
+		var player: RigidPlayer = player_value as RigidPlayer
+		player.set_spawns(Global.get_world().get_spawnpoint_for_team(player.team))
+		player.protect_spawn()
+		player.go_to_spawn()
+
+func _reset_teams_to_default_local() -> void:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for player_value: Variant in players_snapshot:
+		if player_value == null or !is_instance_valid(player_value):
+			continue
+		if not (player_value is RigidPlayer):
+			continue
+		var player: RigidPlayer = player_value as RigidPlayer
+		player.update_team("Default")
 
 func run() -> void:
 	# only server starts games
@@ -139,11 +206,21 @@ func end(params : Array) -> void:
 	if !multiplayer.is_server() and !_force_local_sync: return
 	print(get_multiplayer_authority(), " - Ended gamemode: ", gamemode_name)
 	# cleanup and run any final stuff
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for p_value: Variant in players_snapshot:
+		if p_value == null or !is_instance_valid(p_value):
+			continue
+		if not (p_value is RigidPlayer):
+			continue
+		var p: RigidPlayer = p_value as RigidPlayer
 		if _force_local_sync:
 			p.get_tool_inventory().reset()
 		else:
 			p.get_tool_inventory().reset.rpc()
+		p.update_kills(0)
+		p.update_deaths(0)
+		p.update_capture_time(-1)
+		p.update_checkpoint(0)
 		# reset player stuff
 		p.set_max_health(20)
 		if _force_local_sync:
@@ -169,6 +246,10 @@ func end(params : Array) -> void:
 	if game_timer.is_connected("timeout", end.bind([])):
 		game_timer.disconnect("timeout", end.bind([]))
 	game_timer.stop()
+	if not _force_local_sync:
+		var adapter: MultiplayerNodeAdapter = Global.get_node_adapter()
+		if adapter != null and adapter.is_server():
+			adapter.send_rpc_call("remote_end_gamemode", [])
 	# show vote screen
 	# only runs as server
 	vote_panel.start_voting()

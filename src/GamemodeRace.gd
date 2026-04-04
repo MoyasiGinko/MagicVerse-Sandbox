@@ -40,15 +40,21 @@ func set_run_parameters(p : RigidPlayer) -> void:
 	pass
 
 func run() -> void:
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# wait for super method (camera preview)
 	await super()
 
-	# run start events
-	Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
-	if !ffa:
-		Event.new(Event.EventType.BALANCE_TEAMS).start()
-	Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
+	if _force_local_sync:
+		_clear_leaderboard_local()
+		if !ffa:
+			_balance_teams_local()
+		_move_all_players_to_spawn_local()
+	else:
+		# run start events
+		Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
+		if !ffa:
+			Event.new(Event.EventType.BALANCE_TEAMS).start()
+		Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
 	# grace period in case any players were on finish line before gamemode started
 	await get_tree().create_timer(0.5).timeout
 	# in case ended during start events being run
@@ -77,5 +83,8 @@ func end(args : Array) -> void:
 	# show podium
 	await Event.new(Event.EventType.SHOW_PODIUM, args).start()
 	# reset teams
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
-		p.update_team.rpc("Default")
+	if _force_local_sync:
+		_reset_teams_to_default_local()
+	else:
+		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+			p.update_team.rpc("Default")

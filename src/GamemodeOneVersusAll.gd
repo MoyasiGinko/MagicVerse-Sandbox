@@ -27,16 +27,22 @@ func _init() -> void:
 # runs as server
 func set_run_parameters(p : RigidPlayer, one_name : String = "") -> void:
 	var teams : Teams = Global.get_world().get_current_map().get_teams()
-	p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball)
-	p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
-	p.update_team.rpc(teams.get_team_list()[2].name)
-	UIHandler.show_alert.rpc_id(p.get_multiplayer_authority(), str("Work with your team to take out ", one_name, " before time runs out!\nCareful: if they kill you, the timer decreases\nand they get a bit of health."), 10, false, UIHandler.alert_colour_player)
+	if _force_local_sync:
+		p.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bouncyball)
+		p.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat)
+		p.update_team(str(teams.get_team_list()[2].name))
+		UIHandler.show_alert(str("Work with your team to take out ", one_name, " before time runs out!\nCareful: if they kill you, the timer decreases\nand they get a bit of health."), 10, false, UIHandler.alert_colour_player)
+	else:
+		p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball)
+		p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
+		p.update_team.rpc(teams.get_team_list()[2].name)
+		UIHandler.show_alert.rpc_id(p.get_multiplayer_authority(), str("Work with your team to take out ", one_name, " before time runs out!\nCareful: if they kill you, the timer decreases\nand they get a bit of health."), 10, false, UIHandler.alert_colour_player)
 
 func run() -> void:
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# wait for super method (camera preview)
 	await super()
-	
+
 	var others : Array = Global.get_world().rigidplayer_list.duplicate()
 	var seekers : Array = []
 	# pick random player to be Seeker
@@ -46,18 +52,27 @@ func run() -> void:
 	one.set_health((others.size() * 20) as int)
 	one.connect("kills_increased", _on_one_kills_increased)
 	# custom weapons for one player
-	one.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball, -1, {"shot_cooldown": 15})
-	one.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat, -1, {"knockback": 5})
-	
-	one.update_team.rpc(teams.get_team_list()[1].name)
-	UIHandler.show_alert.rpc_id(one.get_multiplayer_authority(), "You're on your own!\nSurvive as long as possible!", 10, false, UIHandler.alert_colour_player)
+	if _force_local_sync:
+		one.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bouncyball, -1, {"shot_cooldown": 15})
+		one.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat, -1, {"knockback": 5})
+		one.update_team(str(teams.get_team_list()[1].name))
+		UIHandler.show_alert("You're on your own!\nSurvive as long as possible!", 10, false, UIHandler.alert_colour_player)
+	else:
+		one.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball, -1, {"shot_cooldown": 15})
+		one.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat, -1, {"knockback": 5})
+		one.update_team.rpc(teams.get_team_list()[1].name)
+		UIHandler.show_alert.rpc_id(one.get_multiplayer_authority(), "You're on your own!\nSurvive as long as possible!", 10, false, UIHandler.alert_colour_player)
 	# this one has been chosen, erase from the remaining hiders pool
 	others.erase(one)
 	for player : RigidPlayer in others:
 		set_run_parameters(player, one.display_name)
-	# run start events
-	Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
-	Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
+	if _force_local_sync:
+		_clear_leaderboard_local()
+		_move_all_players_to_spawn_local()
+	else:
+		# run start events
+		Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
+		Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
 	# wait for next frame
 	await get_tree().process_frame
 	# in case ended during start events being run
@@ -79,7 +94,7 @@ func _on_one_kills_increased() -> void:
 
 func end(args : Array) -> void:
 	# only server ends games
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# if ended due to timer, then the one player wins
 	if args.is_empty():
 		args = [one.get_multiplayer_authority(), "player"]
@@ -94,5 +109,8 @@ func end(args : Array) -> void:
 	# show podium
 	await Event.new(Event.EventType.SHOW_PODIUM, args).start()
 	# reset teams
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
-		p.update_team.rpc("Default")
+	if _force_local_sync:
+		_reset_teams_to_default_local()
+	else:
+		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+			p.update_team.rpc("Default")

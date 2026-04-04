@@ -33,18 +33,28 @@ func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 # runs as server
 func set_run_parameters(p : RigidPlayer) -> void:
 	var teams : Teams = Global.get_world().get_current_map().get_teams()
-	p.update_team.rpc(teams.get_team_list()[2].name)
-	p.set_name_visible.rpc(false)
+	if _force_local_sync:
+		p.update_team(str(teams.get_team_list()[2].name))
+		p.set_name_visible(false)
+	else:
+		p.update_team.rpc(teams.get_team_list()[2].name)
+		p.set_name_visible.rpc(false)
 	p.connect("hit_by_melee", _on_hider_hit_by_melee.bind(p))
-	UIHandler.show_alert.rpc_id(p.get_multiplayer_authority(), str("You are a hider! Hide from the seekers (green)!"), 10, false, UIHandler.alert_colour_player)
+	if _force_local_sync:
+		UIHandler.show_alert(str("You are a hider! Hide from the seekers (green)!"), 10, false, UIHandler.alert_colour_player)
+	else:
+		UIHandler.show_alert.rpc_id(p.get_multiplayer_authority(), str("You are a hider! Hide from the seekers (green)!"), 10, false, UIHandler.alert_colour_player)
 
 func run() -> void:
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# wait for super method (camera preview)
 	await super()
 
 	# set camera max zoom distance
-	Global.set_camera_max_dist.rpc(8)
+	if _force_local_sync:
+		Global.set_camera_max_dist(8)
+	else:
+		Global.set_camera_max_dist.rpc(8)
 
 	var others : Array = Global.get_world().rigidplayer_list.duplicate()
 	var seekers : Array = []
@@ -53,26 +63,46 @@ func run() -> void:
 	for i : int in range(seeker_amt):
 		var seeker : RigidPlayer = others.pick_random()
 		seekers.append(seeker)
-		seeker.update_team.rpc(teams.get_team_list()[1].name)
-		# give them the bat
-		seeker.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
-		UIHandler.show_alert.rpc_id(seeker.get_multiplayer_authority(), "You are a Seeker! Find the hiders and hit them with your bat!", 10, false, UIHandler.alert_colour_player)
+		if _force_local_sync:
+			seeker.update_team(str(teams.get_team_list()[1].name))
+			# give them the bat
+			seeker.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat)
+			UIHandler.show_alert("You are a Seeker! Find the hiders and hit them with your bat!", 10, false, UIHandler.alert_colour_player)
+		else:
+			seeker.update_team.rpc(teams.get_team_list()[1].name)
+			# give them the bat
+			seeker.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
+			UIHandler.show_alert.rpc_id(seeker.get_multiplayer_authority(), "You are a Seeker! Find the hiders and hit them with your bat!", 10, false, UIHandler.alert_colour_player)
 		# this one has been chosen, erase from the remaining hiders pool
 		others.erase(seeker)
 	# set others to runners
 	for player : RigidPlayer in others:
 		set_run_parameters(player)
 	# move all players to spawn
-	Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
+	if _force_local_sync:
+		_move_all_players_to_spawn_local()
+	else:
+		Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
 	# set seeker to locked for now
 	for seeker : RigidPlayer in seekers:
-		seeker.change_state.rpc_id(seeker.get_multiplayer_authority(), RigidPlayer.DUMMY)
+		if _force_local_sync:
+			seeker.change_state(RigidPlayer.DUMMY)
+		else:
+			seeker.change_state.rpc_id(seeker.get_multiplayer_authority(), RigidPlayer.DUMMY)
 		seeker.protect_spawn(16, false)
 	# seeker timer
-	await Event.new(Event.EventType.WAIT_FOR_SECONDS, [15, true, "Seeker(s) released in "]).start()
+	if _force_local_sync:
+		for i : int in range(15):
+			UIHandler.show_alert(str("Seeker(s) released in ", 15 - i), 1, false, Color.SEA_GREEN)
+			await get_tree().create_timer(1).timeout
+	else:
+		await Event.new(Event.EventType.WAIT_FOR_SECONDS, [15, true, "Seeker(s) released in "]).start()
 	# unlock seeker after countdown
 	for seeker : RigidPlayer in seekers:
-		seeker.change_state.rpc_id(seeker.get_multiplayer_authority(), RigidPlayer.IDLE)
+		if _force_local_sync:
+			seeker.change_state(RigidPlayer.IDLE)
+		else:
+			seeker.change_state.rpc_id(seeker.get_multiplayer_authority(), RigidPlayer.IDLE)
 	# add hider death penalty after seeker has been released
 	for player : RigidPlayer in others:
 		player.connect("died", _on_hider_death.bind(player))
@@ -92,28 +122,54 @@ func _on_hider_hit_by_melee(tool : Tool, player : RigidPlayer) -> void:
 	var teams : Teams = Global.get_world().get_current_map().get_teams()
 	# if the tool owner (seeker)'s team is Seekers, and the hit player is not already on Seekers
 	if tool.tool_player_owner.team == teams.get_team_list()[1].name && player.team != teams.get_team_list()[1].name:
-		UIHandler.show_alert.rpc(str(player.display_name, " was found by ", tool.tool_player_owner.display_name, "!"), 5, false, UIHandler.alert_colour_player)
+		if _force_local_sync:
+			UIHandler.show_alert(str(player.display_name, " was found by ", tool.tool_player_owner.display_name, "!"), 5, false, UIHandler.alert_colour_player)
+		else:
+			UIHandler.show_alert.rpc(str(player.display_name, " was found by ", tool.tool_player_owner.display_name, "!"), 5, false, UIHandler.alert_colour_player)
 		player.get_tool_inventory().delete_all_tools()
-		player.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
+		if _force_local_sync:
+			player.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat)
+		else:
+			player.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
 		# seekers' names are visible
-		player.set_name_visible.rpc(true)
-		UIHandler.show_alert.rpc_id(player.get_multiplayer_authority(), "You are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
+		if _force_local_sync:
+			player.set_name_visible(true)
+			UIHandler.show_alert("You are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
+		else:
+			player.set_name_visible.rpc(true)
+			UIHandler.show_alert.rpc_id(player.get_multiplayer_authority(), "You are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
 		await get_tree().process_frame
 		# change the player who got hit to seeker team
-		player.update_team.rpc(teams.get_team_list()[1].name)
+		if _force_local_sync:
+			player.update_team(str(teams.get_team_list()[1].name))
+		else:
+			player.update_team.rpc(teams.get_team_list()[1].name)
 
 func _on_hider_death(player : RigidPlayer) -> void:
 	var teams : Teams = Global.get_world().get_current_map().get_teams()
 	if player.team == teams.get_team_list()[2].name:
-		UIHandler.show_alert.rpc(str(player.display_name, " died and became a Seeker!"), 5, false, UIHandler.alert_colour_player)
+		if _force_local_sync:
+			UIHandler.show_alert(str(player.display_name, " died and became a Seeker!"), 5, false, UIHandler.alert_colour_player)
+		else:
+			UIHandler.show_alert.rpc(str(player.display_name, " died and became a Seeker!"), 5, false, UIHandler.alert_colour_player)
 		player.get_tool_inventory().delete_all_tools()
-		player.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
+		if _force_local_sync:
+			player.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat)
+		else:
+			player.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
 		# seekers' names are visible
-		player.set_name_visible.rpc(true)
-		UIHandler.show_alert.rpc_id(player.get_multiplayer_authority(), "You died and are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
+		if _force_local_sync:
+			player.set_name_visible(true)
+			UIHandler.show_alert("You died and are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
+		else:
+			player.set_name_visible.rpc(true)
+			UIHandler.show_alert.rpc_id(player.get_multiplayer_authority(), "You died and are now a Seeker! Find the other hiders!", 6, false, UIHandler.alert_colour_gold)
 		await get_tree().process_frame
 		# change the player who got hit to seeker team
-		player.update_team.rpc(teams.get_team_list()[1].name)
+		if _force_local_sync:
+			player.update_team(str(teams.get_team_list()[1].name))
+		else:
+			player.update_team.rpc(teams.get_team_list()[1].name)
 		# no longer need connection
 		player.disconnect("died", _on_hider_death.bind(player))
 
@@ -124,9 +180,15 @@ func end(args : Array) -> void:
 			player.disconnect("hit_by_melee", _on_hider_hit_by_melee.bind(player))
 		if player.is_connected("died", _on_hider_death.bind(player)):
 			player.disconnect("died", _on_hider_death.bind(player))
-		player.set_name_visible.rpc(true)
+		if _force_local_sync:
+			player.set_name_visible(true)
+		else:
+			player.set_name_visible.rpc(true)
 	# reset camera zoom distance
-	Global.set_camera_max_dist.rpc()
+	if _force_local_sync:
+		Global.set_camera_max_dist()
+	else:
+		Global.set_camera_max_dist.rpc()
 	# if ended with no args that means that the timer expired
 	# and the hiders won
 	if args.is_empty():
@@ -141,5 +203,8 @@ func end(args : Array) -> void:
 	# show podium
 	await Event.new(Event.EventType.SHOW_PODIUM, args).start()
 	# reset teams
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
-		p.update_team.rpc("Default")
+	if _force_local_sync:
+		_reset_teams_to_default_local()
+	else:
+		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+			p.update_team.rpc("Default")

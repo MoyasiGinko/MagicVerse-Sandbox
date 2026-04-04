@@ -42,7 +42,7 @@ func set_run_parameters(p : RigidPlayer) -> void:
 	p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat, -1, {"knockback": bat_knockback})
 
 func run() -> void:
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# wait for super method (camera preview)
 	super()
 

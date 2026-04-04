@@ -12,6 +12,7 @@ signal rooms_list_changed  # New signal for room list changes
 signal peer_connected(peer_id: int)  # For multiplayer system integration
 signal peer_disconnected(peer_id: int)  # For multiplayer system integration
 signal peer_joined_with_name(peer_id: int, peer_name: String)  # For player list updates
+signal host_changed(new_host_peer_id: int, is_me_host: bool)
 signal chat_received(peer_id: int, sender_name: String, text: String, created_at: String)
 
 var ws: WebSocketPeer = null
@@ -22,6 +23,7 @@ var _connected_peers: PackedInt32Array = []
 var _is_connected: bool = false
 var _handshake_accepted: bool = false
 var _is_server: bool = false  # Will be true if this peer is the host
+var _current_host_peer_id: int = 1
 var _pending_members: Array = []  # Store members received before World is ready
 var room_members: Array = []  # Public accessor for room member list
 
@@ -97,6 +99,10 @@ func _on_ws_message() -> void:
 			_handle_peer_joined(msg_data)
 		"peer_left":
 			_handle_peer_left(msg_data)
+		"left_room":
+			_handle_left_room(msg_data)
+		"host_changed":
+			_handle_host_changed(msg_data)
 		"player_state":
 			_handle_player_state(msg_data)
 		"chat":
@@ -137,6 +143,7 @@ func _handle_room_joined(data: Dictionary) -> void:
 	_connected_peers.clear()
 	_pending_members.clear()  # Clear pending - Main.gd will spawn existing members from room_members
 	room_members.clear()
+	_current_host_peer_id = 1
 
 	var seen_ids := {}
 	for member: Variant in members:
@@ -144,12 +151,15 @@ func _handle_room_joined(data: Dictionary) -> void:
 			var member_dict: Dictionary = member as Dictionary
 			var peer_id: int = member_dict.get("peerId", 0) as int
 			var peer_name: String = member_dict.get("name", "Unknown") as String
+			var member_is_host: bool = member_dict.get("isHost", false) as bool
 			if seen_ids.has(peer_id):
 				continue
 			seen_ids[peer_id] = true
+			if member_is_host:
+				_current_host_peer_id = peer_id
 
 			# Add all members to room_members (including self)
-			room_members.append({"peerId": peer_id, "name": peer_name})
+			room_members.append({"peerId": peer_id, "name": peer_name, "isHost": member_is_host})
 
 			# Skip self for connected_peers
 			if peer_id == _peer_id:
@@ -377,6 +387,13 @@ func load_tbw(lines: PackedStringArray) -> void:
 func send_player_snapshot(state: Dictionary) -> void:
 	_send_message("player_snapshot", state)
 
+func leave_room() -> void:
+	if ws == null or ws.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		return
+	if _room_id == "" or _peer_id <= 0:
+		return
+	_send_message("leave_room", {"roomId": _room_id})
+
 func send_rpc_call(method_name: String, args: Array = [], target_peer: int = 0) -> void:
 	"""Send an RPC-style call to backend to relay to peers.
 
@@ -493,12 +510,14 @@ func get_all_peers_with_names() -> Array:
 			var member: Dictionary = member_data as Dictionary
 			var pid: int = member.get("peerId", 0) as int
 			var pname: String = member.get("name", "Unknown") as String
+			var is_host: bool = pid == _current_host_peer_id
 			if pid <= 0:
 				continue
 			peers.append({
 				"peerId": pid,
 				"name": pname,
-				"is_self": pid == _peer_id
+				"is_self": pid == _peer_id,
+				"is_host": is_host
 			})
 
 	# If room_members is empty (early join), fall back to pending/self
@@ -507,15 +526,18 @@ func get_all_peers_with_names() -> Array:
 			peers.append({
 				"peerId": _peer_id,
 				"name": Global.display_name,
-				"is_self": true
+				"is_self": true,
+				"is_host": _peer_id == _current_host_peer_id
 			})
 		for member_data: Variant in _pending_members:
 			if typeof(member_data) == TYPE_DICTIONARY:
 				var member: Dictionary = member_data as Dictionary
+				var pid: int = member.get("peerId", 0) as int
 				peers.append({
-					"peerId": member.get("peerId", 0),
+					"peerId": pid,
 					"name": member.get("name", "Unknown"),
-					"is_self": false
+					"is_self": false,
+					"is_host": pid == _current_host_peer_id
 				})
 
 	return peers
@@ -557,7 +579,7 @@ func _handle_peer_joined(data: Dictionary) -> void:
 	print("[NodeAdapter] 🔍 Attempting to spawn remote player...")
 
 	# Add to room_members
-	room_members.append({"peerId": peer_id, "name": name})
+	room_members.append({"peerId": peer_id, "name": name, "isHost": false})
 
 	# Add to connected peers list if not already there
 	if not _connected_peers.has(peer_id):
@@ -618,6 +640,33 @@ func _handle_peer_left(data: Dictionary) -> void:
 		var player: Node = world.get_node(str(peer_id))
 		print("[NodeAdapter] 🗑️ Despawning player ", peer_id)
 		player.queue_free()
+
+func _handle_host_changed(data: Dictionary) -> void:
+	var new_host_peer_id: int = data.get("newHostPeerId", 0) as int
+	if new_host_peer_id <= 0:
+		return
+	_current_host_peer_id = new_host_peer_id
+	for i: int in range(room_members.size()):
+		var member_value: Variant = room_members[i]
+		if not (member_value is Dictionary):
+			continue
+		var member: Dictionary = member_value as Dictionary
+		var pid: int = member.get("peerId", 0) as int
+		member["isHost"] = (pid == new_host_peer_id)
+		room_members[i] = member
+	var am_i_host: bool = (new_host_peer_id == _peer_id)
+	_is_server = am_i_host
+	print("[NodeAdapter] 👑 Host changed: peer ", new_host_peer_id, " (am_i_host=", am_i_host, ")")
+	host_changed.emit(new_host_peer_id, am_i_host)
+
+func _handle_left_room(_data: Dictionary) -> void:
+	_room_id = ""
+	_peer_id = 0
+	_current_host_peer_id = 1
+	_connected_peers.clear()
+	_pending_members.clear()
+	room_members.clear()
+	_is_server = false
 
 func _handle_player_state(data: Dictionary) -> void:
 	"""Handle incoming player state (position, rotation, velocity, animation state, animation blends)"""

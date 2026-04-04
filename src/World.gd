@@ -306,7 +306,7 @@ func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = []
 	var idx_int := _to_int(idx)
 	if idx_int < 0 or idx_int >= gamemode_list.size():
 		return
-	Global.server_start_gamemode(idx_int, params, mods, true)
+	Global.server_start_gamemode(idx_int, params, mods, true, _started_at_ms)
 
 func remote_end_gamemode() -> void:
 	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])

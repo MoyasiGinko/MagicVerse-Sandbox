@@ -33,21 +33,31 @@ func _init(_ffa : bool) -> void:
 
 # runs as server
 func set_run_parameters(p : RigidPlayer) -> void:
-	p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball)
-	p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
+	if _force_local_sync:
+		p.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bouncyball)
+		p.get_tool_inventory().add_tool(ToolInventory.ToolIdx.Bat)
+	else:
+		p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bouncyball)
+		p.get_tool_inventory().add_tool.rpc(ToolInventory.ToolIdx.Bat)
 
 func run() -> void:
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	# wait for super method (camera preview)
 	await super()
-	
+
 	for p : RigidPlayer in Global.get_world().rigidplayer_list:
 		set_run_parameters(p)
-	# run start events
-	Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
-	if !ffa:
-		Event.new(Event.EventType.BALANCE_TEAMS).start()
-	Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
+	if _force_local_sync:
+		_clear_leaderboard_local()
+		if !ffa:
+			_balance_teams_local()
+		_move_all_players_to_spawn_local()
+	else:
+		# run start events
+		Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
+		if !ffa:
+			Event.new(Event.EventType.BALANCE_TEAMS).start()
+		Event.new(Event.EventType.MOVE_ALL_PLAYERS_TO_SPAWN).start()
 	# wait for next frame
 	await get_tree().process_frame
 	# in case ended during start events being run
@@ -65,7 +75,7 @@ func run() -> void:
 
 func end(args : Array) -> void:
 	# only server ends games
-	if !multiplayer.is_server(): return
+	if !multiplayer.is_server() and !_force_local_sync: return
 	if args.is_empty():
 		# free for all determinant
 		if ffa:
@@ -106,5 +116,8 @@ func end(args : Array) -> void:
 	# show podium
 	await Event.new(Event.EventType.SHOW_PODIUM, args).start()
 	# reset teams
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
-		p.update_team.rpc("Default")
+	if _force_local_sync:
+		_reset_teams_to_default_local()
+	else:
+		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+			p.update_team.rpc("Default")

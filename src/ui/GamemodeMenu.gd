@@ -47,9 +47,7 @@ func _ready() -> void:
 func _on_start_gamemode_pressed() -> void:
 	var adapter := _get_node_adapter()
 	if adapter != null and adapter.is_server():
-		var started_at_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
 		Global.server_start_gamemode(selector.selected, selected_mode_params, selected_mode_mods)
-		adapter.send_rpc_call("remote_start_gamemode", [selector.selected, selected_mode_params, selected_mode_mods, started_at_ms])
 		return
 	Global.server_start_gamemode.rpc_id(1, selector.selected, selected_mode_params, selected_mode_mods)
 

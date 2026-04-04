@@ -44,7 +44,7 @@ func start() -> void:
 	if !multiplayer.is_server(): return
 	# watch for watcher condition
 	started = true
-	
+
 	# run once variables (ie, waiting for a timer)
 	match (watcher_type):
 		WatcherType.TIMER_EXCEEDS:
@@ -56,38 +56,83 @@ func start() -> void:
 
 func _physics_process(delta : float) -> void:
 	if started && multiplayer.is_server():
+		var world: World = Global.get_world()
+		if world == null or !is_instance_valid(world):
+			return
+		var players_snapshot: Array = world.rigidplayer_list.duplicate()
+		var team_list: Array = world.get_current_map().get_teams().get_team_list()
 		# constantly checked variables
 		match (watcher_type):
 			WatcherType.PLAYER_PROPERTY_EXCEEDS:
-				for player : RigidPlayer in Global.get_world().rigidplayer_list:
+				for player_value: Variant in players_snapshot:
+					if player_value == null or !is_instance_valid(player_value):
+						continue
+					if not (player_value is RigidPlayer):
+						continue
+					var player: RigidPlayer = player_value as RigidPlayer
 					if player.get(str(args[0])) > str(args[1]).to_int():
 						end([player.get_multiplayer_authority()])
 			WatcherType.PLAYER_PROPERTY_FALLS_BELOW:
-				for player : RigidPlayer in Global.get_world().rigidplayer_list:
+				for player_value: Variant in players_snapshot:
+					if player_value == null or !is_instance_valid(player_value):
+						continue
+					if not (player_value is RigidPlayer):
+						continue
+					var player: RigidPlayer = player_value as RigidPlayer
 					if player.get(str(args[0])) < str(args[1]).to_int():
 						end([player.get_multiplayer_authority()])
 			WatcherType.TEAM_PROPERTY_EXCEEDS:
-				for team : Team in Global.get_world().get_current_map().get_teams().get_team_list():
+				for team_value: Variant in team_list:
+					if team_value == null or !is_instance_valid(team_value):
+						continue
+					if not (team_value is Team):
+						continue
+					var team: Team = team_value as Team
 					var total_team_prop : int = 0
-					for player : RigidPlayer in Global.get_world().rigidplayer_list:
+					for player_value: Variant in players_snapshot:
+						if player_value == null or !is_instance_valid(player_value):
+							continue
+						if not (player_value is RigidPlayer):
+							continue
+						var player: RigidPlayer = player_value as RigidPlayer
 						if player.team == team.name:
 							total_team_prop += player.get(str(args[0]))
 					if total_team_prop > str(args[1]).to_int():
 						end([team.name])
 			WatcherType.SPECIFIC_TEAM_PROPERTY_EXCEEDS:
-				for team : Team in Global.get_world().get_current_map().get_teams().get_team_list():
+				for team_value: Variant in team_list:
+					if team_value == null or !is_instance_valid(team_value):
+						continue
+					if not (team_value is Team):
+						continue
+					var team: Team = team_value as Team
 					if team.name == str(args[2]):
 						var total_team_prop : int = 0
-						for player : RigidPlayer in Global.get_world().rigidplayer_list:
+						for player_value: Variant in players_snapshot:
+							if player_value == null or !is_instance_valid(player_value):
+								continue
+							if not (player_value is RigidPlayer):
+								continue
+							var player: RigidPlayer = player_value as RigidPlayer
 							if player.team == team.name:
 								total_team_prop += player.get(str(args[0]))
 						if total_team_prop > str(args[1]).to_int():
 							end([team.name])
 			WatcherType.TEAM_PROPERY_EXCEEDS_FOR_EACH_PLAYER:
-				for team : Team in Global.get_world().get_current_map().get_teams().get_team_list():
+				for team_value: Variant in team_list:
+					if team_value == null or !is_instance_valid(team_value):
+						continue
+					if not (team_value is Team):
+						continue
+					var team: Team = team_value as Team
 					if team.members.size() > 0:
 						var condition_met : bool = true
-						for player : RigidPlayer in Global.get_world().rigidplayer_list:
+						for player_value: Variant in players_snapshot:
+							if player_value == null or !is_instance_valid(player_value):
+								continue
+							if not (player_value is RigidPlayer):
+								continue
+							var player: RigidPlayer = player_value as RigidPlayer
 							if player.team == team.name:
 								if player.get(str(args[0])) <= str(args[1]).to_int():
 									condition_met = false
@@ -95,10 +140,17 @@ func _physics_process(delta : float) -> void:
 							end([team.name])
 			WatcherType.TEAM_FULL:
 				# arg 0: team name
-				var teams : Teams = Global.get_world().get_current_map().get_teams()
+				var teams : Teams = world.get_current_map().get_teams()
 				var team : Team = teams.get_team(str(args[0]))
-				
-				for player : RigidPlayer in Global.get_world().rigidplayer_list:
+				if team == null or !is_instance_valid(team):
+					return
+
+				for player_value: Variant in players_snapshot:
+					if player_value == null or !is_instance_valid(player_value):
+						continue
+					if not (player_value is RigidPlayer):
+						continue
+					var player: RigidPlayer = player_value as RigidPlayer
 					if player.team != team.name:
 						return
 				# has all players
