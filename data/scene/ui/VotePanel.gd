@@ -95,12 +95,24 @@ func _on_vote_timeout() -> void:
 			Global.server_start_gamemode.rpc_id(1, Global.last_gamemode_idx, Global.last_gamemode_params, Global.last_gamemode_mods)
 		5:
 			# sandbox
-			for player : RigidPlayer in Global.get_world().rigidplayer_list:
+			var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players_snapshot:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				player.change_state.rpc_id(player.get_multiplayer_authority(), RigidPlayer.IDLE)
 				player.go_to_spawn()
 				player.protect_spawn()
 		_:
-			for player : RigidPlayer in Global.get_world().rigidplayer_list:
+			var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players_snapshot:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				player.change_state.rpc_id(player.get_multiplayer_authority(), RigidPlayer.IDLE)
 				player.protect_spawn()
 			# get map based on ID

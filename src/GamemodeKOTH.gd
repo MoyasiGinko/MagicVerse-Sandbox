@@ -82,7 +82,13 @@ func run() -> void:
 	else:
 		# run start events
 		Event.new(Event.EventType.CLEAR_LEADERBOARD).start()
-	for p : RigidPlayer in Global.get_world().rigidplayer_list:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for p_value: Variant in players_snapshot:
+		if p_value == null or !is_instance_valid(p_value):
+			continue
+		if not (p_value is RigidPlayer):
+			continue
+		var p: RigidPlayer = p_value as RigidPlayer
 		set_run_parameters(p)
 	if _force_local_sync:
 		if !ffa:
@@ -122,21 +128,41 @@ func end(args : Array) -> void:
 		# free for all determinant
 		if ffa:
 			var player_highest_capture : RigidPlayer = null
-			for player : RigidPlayer in Global.get_world().rigidplayer_list:
+			var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players_snapshot:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				if player_highest_capture == null:
 					player_highest_capture = player
 				else:
 					if player.capture_time > player_highest_capture.capture_time:
 						player_highest_capture = player
+			if player_highest_capture == null:
+				return
 			# determine winner if we ended based on timer
 			args = [player_highest_capture.get_multiplayer_authority(), "player"]
 		#team
 		else:
 			var team_highest_capture : Team = null
 			var team_highest_capture_count : int = 0
-			for team : Team in Global.get_world().get_current_map().get_teams().get_team_list():
+			var teams_snapshot: Array = Global.get_world().get_current_map().get_teams().get_team_list().duplicate()
+			var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+			for team_value: Variant in teams_snapshot:
+				if team_value == null or !is_instance_valid(team_value):
+					continue
+				if not (team_value is Team):
+					continue
+				var team: Team = team_value as Team
 				var total_team_capture : int = 0
-				for player : RigidPlayer in Global.get_world().rigidplayer_list:
+				for player_value: Variant in players_snapshot:
+					if player_value == null or !is_instance_valid(player_value):
+						continue
+					if not (player_value is RigidPlayer):
+						continue
+					var player: RigidPlayer = player_value as RigidPlayer
 					if player.team == team.name:
 						total_team_capture += player.capture_time
 				if team_highest_capture == null:
@@ -145,6 +171,8 @@ func end(args : Array) -> void:
 				elif total_team_capture > team_highest_capture_count:
 					team_highest_capture = team
 					team_highest_capture_count = total_team_capture
+			if team_highest_capture == null:
+				return
 			args = [team_highest_capture.name, "team"]
 	# args returned from watcher does not have player/team distinction
 	else:
@@ -161,5 +189,11 @@ func end(args : Array) -> void:
 	if _force_local_sync:
 		_reset_teams_to_default_local()
 	else:
-		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+		var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+		for p_value: Variant in players_snapshot:
+			if p_value == null or !is_instance_valid(p_value):
+				continue
+			if not (p_value is RigidPlayer):
+				continue
+			var p: RigidPlayer = p_value as RigidPlayer
 			p.update_team.rpc("Default")

@@ -187,6 +187,12 @@ func run() -> void:
 		update_timer()
 
 func update_timer() -> void:
+	if not running:
+		return
+	if game_timer == null or !is_instance_valid(game_timer):
+		return
+	if timer_ui == null or !is_instance_valid(timer_ui):
+		return
 	if _force_local_sync:
 		var timer_text : Label = timer_ui.get_node_or_null("Label")
 		if timer_text != null:
@@ -198,7 +204,7 @@ func update_timer() -> void:
 		timer_ui.update_timer.rpc(gamemode_name, game_timer.time_left)
 	# update every 1s
 	await get_tree().create_timer(1).timeout
-	if running:
+	if running and is_instance_valid(self):
 		update_timer()
 
 func end(params : Array) -> void:

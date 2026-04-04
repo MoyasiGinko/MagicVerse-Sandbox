@@ -78,6 +78,21 @@ func _variant_to_int(value: Variant, fallback: int = 0) -> int:
 		return int(value as float)
 	return fallback
 
+func _extract_room_server_id(room: Dictionary) -> String:
+	var direct_keys: Array[String] = ["server_id", "serverId", "game_server_id", "gameServerId", "node_server_id", "nodeServerId"]
+	for key: String in direct_keys:
+		if room.has(key):
+			var value := str(room.get(key, "")).strip_edges()
+			if value != "":
+				return value
+	var server_meta: Variant = room.get("server", null)
+	if server_meta is Dictionary:
+		var server_dict := server_meta as Dictionary
+		var nested := str(server_dict.get("id", "")).strip_edges()
+		if nested != "":
+			return nested
+	return ""
+
 func _ready() -> void:
 	print("[ServerList] Initializing...")
 
@@ -287,11 +302,17 @@ func _fetch_rooms_for_server(server_data: Dictionary) -> Dictionary:
 	if capacity is Dictionary:
 		capacity_dict = (capacity as Dictionary).duplicate(true)
 	var merged: Array = []
+	var expected_server_id := str(server_data.get("id", "")).strip_edges()
 	for room_value: Variant in rooms:
 		if not (room_value is Dictionary):
 			continue
 		var room := (room_value as Dictionary).duplicate(true)
+		var room_server_id := _extract_room_server_id(room)
+		if expected_server_id != "" and room_server_id != "" and room_server_id != expected_server_id:
+			continue
 		room["server"] = server_data
+		if expected_server_id != "" and not room.has("server_id"):
+			room["server_id"] = expected_server_id
 		merged.append(room)
 	return {
 		"rooms": merged,
@@ -407,18 +428,32 @@ func _on_refresh_response(result: int, response_code: int, headers: PackedString
 		return
 	var data := json.data as Dictionary
 	var rooms: Array = data.get("rooms", []) as Array
+	var filtered_rooms: Array = []
+	var selected_server_id := str(_selected_server.get("id", "")).strip_edges()
+	for room_value: Variant in rooms:
+		if not (room_value is Dictionary):
+			continue
+		var room := (room_value as Dictionary).duplicate(true)
+		var room_server_id := _extract_room_server_id(room)
+		if selected_server_id != "" and room_server_id != "" and room_server_id != selected_server_id:
+			continue
+		if _selected_server.size() > 0:
+			room["server"] = _selected_server.duplicate(true)
+		if selected_server_id != "" and not room.has("server_id"):
+			room["server_id"] = selected_server_id
+		filtered_rooms.append(room)
 	var server_capacity: Variant = data.get("server_capacity", {})
 	if server_capacity is Dictionary:
 		var cap := server_capacity as Dictionary
-		var current_rooms := _variant_to_int(cap.get("current_rooms", rooms.size()), rooms.size())
+		var current_rooms := _variant_to_int(cap.get("current_rooms", filtered_rooms.size()), filtered_rooms.size())
 		var max_rooms := _variant_to_int(cap.get("max_rooms", -1), -1)
 		if max_rooms >= 0:
 			_set_capacity_text("%d/%d" % [current_rooms, max_rooms], Color(1, 1, 1, 0.8))
 		else:
 			_set_capacity_text("%d" % [current_rooms], Color(1, 1, 1, 0.8))
 	else:
-		_set_capacity_text("%d" % [rooms.size()], Color(1, 1, 1, 0.8))
-	_on_rooms_fetched(rooms)
+		_set_capacity_text("%d" % [filtered_rooms.size()], Color(1, 1, 1, 0.8))
+	_on_rooms_fetched(filtered_rooms)
 	if _pending_rooms_refresh:
 		_pending_rooms_refresh = false
 		call_deferred("refresh_server_list")

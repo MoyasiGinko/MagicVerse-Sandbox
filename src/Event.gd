@@ -45,46 +45,79 @@ func start() -> int:
 	if !multiplayer.is_server():
 		queue_free()
 		return -1
-	
+
 	match (event_type):
 		EventType.TELEPORT_ALL_PLAYERS:
-			var players : Array = Global.get_world().rigidplayer_list
-			for player : RigidPlayer in players:
+			var players : Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				player.protect_spawn()
 				# assuming vec3 may be string formatted
 				player.teleport.rpc(Global.string_to_vec3(str(args[0])))
 		EventType.MOVE_ALL_PLAYERS_TO_SPAWN:
-			var players : Array = Global.get_world().rigidplayer_list
-			for player : RigidPlayer in players:
+			var players : Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				player.set_spawns.rpc(Global.get_world().get_spawnpoint_for_team(player.team))
 				player.protect_spawn()
 				player.go_to_spawn.rpc()
 		EventType.BALANCE_TEAMS:
 			var teams : Teams = Global.get_world().get_current_map().get_teams()
-			var participants : Array = Global.get_world().rigidplayer_list
+			var participants : Array = Global.get_world().rigidplayer_list.duplicate()
 			for i in range(participants.size()):
+				var participant_value: Variant = participants[i]
+				if participant_value == null or !is_instance_valid(participant_value):
+					continue
+				if not (participant_value is RigidPlayer):
+					continue
+				var participant: RigidPlayer = participant_value as RigidPlayer
 				if (i % 2) == 0:
-					participants[i].update_team.rpc(teams.get_team_list()[1].name)
+					participant.update_team.rpc(teams.get_team_list()[1].name)
 				else:
-					participants[i].update_team.rpc(teams.get_team_list()[2].name)
+					participant.update_team.rpc(teams.get_team_list()[2].name)
 				# update info on player's client side
-				participants[i].update_info.rpc_id(participants[i].get_multiplayer_authority(), participants[i].get_multiplayer_authority())
+				participant.update_info.rpc_id(participant.get_multiplayer_authority(), participant.get_multiplayer_authority())
 		EventType.CLEAR_LEADERBOARD:
-			for player : RigidPlayer in Global.get_world().rigidplayer_list:
+			var players : Array = Global.get_world().rigidplayer_list.duplicate()
+			for player_value: Variant in players:
+				if player_value == null or !is_instance_valid(player_value):
+					continue
+				if not (player_value is RigidPlayer):
+					continue
+				var player: RigidPlayer = player_value as RigidPlayer
 				player.update_kills(0)
 				player.update_deaths(0)
 				player.update_capture_time(-1)
 				player.update_checkpoint(0)
 		EventType.END_ACTIVE_GAMEMODE:
-			for gamemode : Gamemode in Global.get_world().gamemode_list:
+			var gamemodes: Array = Global.get_world().gamemode_list.duplicate()
+			for gamemode_value: Variant in gamemodes:
+				if gamemode_value == null or !is_instance_valid(gamemode_value):
+					continue
+				if not (gamemode_value is Gamemode):
+					continue
+				var gamemode: Gamemode = gamemode_value as Gamemode
 				if gamemode.running:
 					gamemode.end([args])
 		EventType.SHOW_PODIUM:
 			if args.size() > 1:
 				# arg 0: player 1 id or team id
 				if args[1] == "player":
-					var players : Array = Global.get_world().rigidplayer_list
-					for player : RigidPlayer in players:
+					var players : Array = Global.get_world().rigidplayer_list.duplicate()
+					for player_value: Variant in players:
+						if player_value == null or !is_instance_valid(player_value):
+							continue
+						if not (player_value is RigidPlayer):
+							continue
+						var player: RigidPlayer = player_value as RigidPlayer
 						if player.name == str(args[0]):
 							player.change_state.rpc_id(player.get_multiplayer_authority(), RigidPlayer.DUMMY)
 							# show animation
@@ -99,14 +132,27 @@ func start() -> int:
 							UIHandler.hide_win_label.rpc()
 				# team name
 				elif args[1] == "team":
-					var players : Array = Global.get_world().rigidplayer_list
+					var players : Array = Global.get_world().rigidplayer_list.duplicate()
 					var winners : Array = []
-					for player : RigidPlayer in players:
+					for player_value: Variant in players:
+						if player_value == null or !is_instance_valid(player_value):
+							continue
+						if not (player_value is RigidPlayer):
+							continue
+						var player: RigidPlayer = player_value as RigidPlayer
 						print(player.team, " player team, ", str(args[0]))
 						if player.team == str(args[0]):
 							winners.append(player)
-					for player : RigidPlayer in winners:
-						player.teleport.rpc_id(player.get_multiplayer_authority(), Vector3(winners[0].global_position.x + randf() as float, winners[0].global_position.y as float, winners[0].global_position.z + randf() as float))
+					for winner_value: Variant in winners:
+						if winner_value == null or !is_instance_valid(winner_value):
+							continue
+						if not (winner_value is RigidPlayer):
+							continue
+						var player: RigidPlayer = winner_value as RigidPlayer
+						if winners.is_empty() or winners[0] == null or !is_instance_valid(winners[0]):
+							continue
+						var podium_anchor: RigidPlayer = winners[0] as RigidPlayer
+						player.teleport.rpc_id(player.get_multiplayer_authority(), Vector3(podium_anchor.global_position.x + randf() as float, podium_anchor.global_position.y as float, podium_anchor.global_position.z + randf() as float))
 						await get_tree().physics_frame
 						player.change_state.rpc_id(player.get_multiplayer_authority(), RigidPlayer.DUMMY)
 					# show animation
@@ -116,7 +162,12 @@ func start() -> int:
 						UIHandler.show_win_label.rpc(str(args[0], " team wins!"))
 					var voting : VotePanel = get_tree().current_scene.get_node("GameCanvas/VotePanel") as VotePanel
 					await voting.voting_ended
-					for winner : RigidPlayer in winners:
+					for winner_value: Variant in winners:
+						if winner_value == null or !is_instance_valid(winner_value):
+							continue
+						if not (winner_value is RigidPlayer):
+							continue
+						var winner: RigidPlayer = winner_value as RigidPlayer
 						winner.change_state.rpc_id(winner.get_multiplayer_authority(), RigidPlayer.IDLE)
 						winner.protect_spawn()
 					UIHandler.hide_win_label.rpc()
@@ -163,6 +214,6 @@ func start() -> int:
 				UIHandler.show_alert.rpc(str("Gamemode started: ", args[0]), 5, false, UIHandler.alert_colour_gold)
 		_:
 			printerr("Failed to run event because the event type is not valid.")
-	
+
 	queue_free()
 	return 0

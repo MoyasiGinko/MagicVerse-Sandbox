@@ -43,13 +43,20 @@ func create_room(config: Dictionary) -> void:
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[GlobalPMBackend] ❌ Not authenticated; cannot create room")
 		return
+	var selected_server_id := BackendConfig.get_selected_server_id().strip_edges()
+	if selected_server_id == "":
+		print("[GlobalPMBackend] ❌ No selected server_id; cannot create room")
+		room_create_failed.emit("Select a specific server before creating a room")
+		return
 	base_api_url = BackendConfig.get_node_api_base_url()
 	var url := base_api_url + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,
 		"Content-Type: application/json"
 	]
-	var body := JSON.stringify(config)
+	var payload := config.duplicate(true)
+	payload["server_id"] = selected_server_id
+	var body := JSON.stringify(payload)
 	print("[GlobalPMBackend] 📤 POST room:", url, " body:", body)
 	var err := _http_create.request(url, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:

@@ -175,7 +175,13 @@ func _on_hider_death(player : RigidPlayer) -> void:
 
 func end(args : Array) -> void:
 	# disconnect hit by melee connections
-	for player : RigidPlayer in Global.get_world().rigidplayer_list:
+	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+	for player_value: Variant in players_snapshot:
+		if player_value == null or !is_instance_valid(player_value):
+			continue
+		if not (player_value is RigidPlayer):
+			continue
+		var player: RigidPlayer = player_value as RigidPlayer
 		if player.is_connected("hit_by_melee", _on_hider_hit_by_melee.bind(player)):
 			player.disconnect("hit_by_melee", _on_hider_hit_by_melee.bind(player))
 		if player.is_connected("died", _on_hider_death.bind(player)):
@@ -206,5 +212,11 @@ func end(args : Array) -> void:
 	if _force_local_sync:
 		_reset_teams_to_default_local()
 	else:
-		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+		var reset_players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+		for p_value: Variant in reset_players_snapshot:
+			if p_value == null or !is_instance_valid(p_value):
+				continue
+			if not (p_value is RigidPlayer):
+				continue
+			var p: RigidPlayer = p_value as RigidPlayer
 			p.update_team.rpc("Default")

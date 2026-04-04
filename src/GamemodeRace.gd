@@ -86,5 +86,11 @@ func end(args : Array) -> void:
 	if _force_local_sync:
 		_reset_teams_to_default_local()
 	else:
-		for p : RigidPlayer in Global.get_world().rigidplayer_list:
+		var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
+		for p_value: Variant in players_snapshot:
+			if p_value == null or !is_instance_valid(p_value):
+				continue
+			if not (p_value is RigidPlayer):
+				continue
+			var p: RigidPlayer = p_value as RigidPlayer
 			p.update_team.rpc("Default")
