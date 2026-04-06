@@ -94,6 +94,8 @@ var _ws_join_waiting: bool = false
 var _ws_join_succeeded: bool = false
 var _ws_join_failed: bool = false
 var _ws_join_fail_reason: String = ""
+var _pending_gamemode_retry_scheduled: bool = false
+var _pending_selected_gamemode_retry_scheduled: bool = false
 
 func _ready() -> void:
 	node_server_url = BackendConfig.get_node_ws_url()
@@ -825,6 +827,46 @@ func _on_peer_joined_with_name(peer_id: int, peer_name: String) -> void:
 			if local_player != null and local_player.is_local_player:
 				local_player.sync_active_tool_to_peers(peer_id)
 
+	_sync_active_gamemode_to_joiner(peer_id)
+
+func _sync_active_gamemode_to_joiner(peer_id: int) -> void:
+	if node_peer == null or !node_peer.is_server():
+		return
+	var world: World = Global.get_world()
+	if world == null:
+		return
+	for idx: int in range(world.gamemode_list.size()):
+		var gm_value: Variant = world.gamemode_list[idx]
+		if not (gm_value is Gamemode):
+			continue
+		var gm: Gamemode = gm_value as Gamemode
+		if gm == null or !gm.running:
+			continue
+		var started_at_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+		var remaining_secs: int = -1
+		var can_send_precise_start: bool = false
+		if gm.game_timer != null and is_instance_valid(gm.game_timer):
+			var total_secs: int = maxi(1, gm.time_limit_seconds)
+			remaining_secs = maxi(1, int(gm.game_timer.time_left))
+			var elapsed_secs: int = maxi(0, total_secs - remaining_secs)
+			started_at_ms -= elapsed_secs * 1000
+			can_send_precise_start = remaining_secs > 1
+		elif gm.timer_ui != null and is_instance_valid(gm.timer_ui):
+			var ui_remaining: int = maxi(0, int(gm.timer_ui.value))
+			var ui_total: int = maxi(1, int(gm.timer_ui.max_value))
+			if ui_remaining > 1:
+				remaining_secs = ui_remaining
+				var elapsed_from_ui: int = maxi(0, ui_total - ui_remaining)
+				started_at_ms -= elapsed_from_ui * 1000
+				can_send_precise_start = true
+		if can_send_precise_start:
+			node_peer.send_rpc_call("remote_start_gamemode", [idx, gm.params.duplicate(true), gm.mods.duplicate(true), started_at_ms, remaining_secs], peer_id)
+		else:
+			print("[Main] ⚠️ Skipping fallback remote_start_gamemode for peer=", peer_id, " idx=", idx, " (no authoritative remaining time)")
+		node_peer.send_rpc_call("remote_gamemode_menu_sync", [idx, gm.params.duplicate(true), gm.mods.duplicate(true)], peer_id)
+		print("[Main] 🎮 Synced active gamemode to late joiner peer=", peer_id, " idx=", idx)
+		return
+
 func _on_connection_failed(reason: String) -> void:
 	if _ws_join_waiting:
 		_ws_join_failed = true
@@ -1021,14 +1063,26 @@ func _load_world_and_start(map_name: String) -> void:
 	print("[Main] 🌍 Loading world...")
 	$World.delete_old_map()
 
-	var lines: Array = Global.get_tbw_lines(map_name, false)
-	if lines.size() > 0:
-		$World.open_tbw(lines)
+	var pending_tbw_lines: Array = []
+	if Global.has_meta("pending_room_tbw"):
+		var pending_tbw_value: Variant = Global.get_meta("pending_room_tbw")
+		if pending_tbw_value is Array:
+			pending_tbw_lines = (pending_tbw_value as Array).duplicate(true)
+		Global.remove_meta("pending_room_tbw")
+
+	if pending_tbw_lines.size() > 0:
+		$World.open_tbw(pending_tbw_lines)
 		await Signal($World, "map_loaded")
-		print("[Main] ✅ Map loaded")
+		print("[Main] ✅ Map loaded from room snapshot")
 	else:
-		push_error("[Main] ❌ Failed to load map")
-		return
+		var lines: Array = Global.get_tbw_lines(map_name, false)
+		if lines.size() > 0:
+			$World.open_tbw(lines)
+			await Signal($World, "map_loaded")
+			print("[Main] ✅ Map loaded")
+		else:
+			push_error("[Main] ❌ Failed to load map")
+			return
 
 	# Add camera
 	var camera_inst : Node3D = CAMERA.instantiate()
@@ -1099,6 +1153,7 @@ func _load_world_and_start(map_name: String) -> void:
 		else:
 			print("[Main] ⚠️ PlayerList not found or missing method")
 	_refresh_member_lists()
+	_apply_pending_selected_gamemode_state()
 	_apply_pending_node_gamemode_state()
 
 func _apply_pending_node_gamemode_state() -> void:
@@ -1116,9 +1171,62 @@ func _apply_pending_node_gamemode_state() -> void:
 	var params: Array = gm.get("params", []) as Array
 	var mods: Array = gm.get("mods", []) as Array
 	var started_at_ms: int = int(gm.get("startedAtMs", 0) as float)
+	var remaining_secs: int = int(gm.get("remainingSecs", -1) as float)
 	print("[Main] 🎮 Replaying active room gamemode idx=", idx)
-	$World.remote_start_gamemode(idx, params, mods, started_at_ms)
-	Global.remove_meta("pending_active_gamemode")
+	if $World.remote_start_gamemode(idx, params, mods, started_at_ms, remaining_secs):
+		Global.remove_meta("pending_active_gamemode")
+		_pending_gamemode_retry_scheduled = false
+	else:
+		_schedule_pending_gamemode_retry()
+
+func _apply_pending_selected_gamemode_state() -> void:
+	if not Global.has_meta("pending_selected_gamemode"):
+		return
+	var pending_value: Variant = Global.get_meta("pending_selected_gamemode")
+	if not (pending_value is Dictionary):
+		Global.remove_meta("pending_selected_gamemode")
+		return
+	var pending: Dictionary = pending_value as Dictionary
+	var idx: int = int(pending.get("index", -1) as float)
+	if idx < 0:
+		Global.remove_meta("pending_selected_gamemode")
+		return
+	var params: Array = pending.get("params", []) as Array
+	var mods: Array = pending.get("mods", []) as Array
+	var menu: Node = get_tree().current_scene.get_node_or_null("GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
+	if menu == null or !menu.has_method("apply_remote_gamemode_state"):
+		_schedule_pending_selected_gamemode_retry()
+		return
+	if menu.has_method("get_selector_item_count"):
+		var selector_count: int = menu.call("get_selector_item_count") as int
+		if selector_count <= idx:
+			_schedule_pending_selected_gamemode_retry()
+			return
+	menu.call("apply_remote_gamemode_state", idx, params, mods)
+	Global.remove_meta("pending_selected_gamemode")
+	_pending_selected_gamemode_retry_scheduled = false
+
+func _schedule_pending_gamemode_retry() -> void:
+	if _pending_gamemode_retry_scheduled:
+		return
+	_pending_gamemode_retry_scheduled = true
+	_call_deferred_pending_gamemode_retry()
+
+func _call_deferred_pending_gamemode_retry() -> void:
+	await get_tree().create_timer(0.2).timeout
+	_pending_gamemode_retry_scheduled = false
+	_apply_pending_node_gamemode_state()
+
+func _schedule_pending_selected_gamemode_retry() -> void:
+	if _pending_selected_gamemode_retry_scheduled:
+		return
+	_pending_selected_gamemode_retry_scheduled = true
+	_call_deferred_pending_selected_gamemode_retry()
+
+func _call_deferred_pending_selected_gamemode_retry() -> void:
+	await get_tree().create_timer(0.2).timeout
+	_pending_selected_gamemode_retry_scheduled = false
+	_apply_pending_selected_gamemode_state()
 
 func _refresh_member_lists() -> void:
 	var game_list: Node = get_node_or_null("GameCanvas/PlayerList")

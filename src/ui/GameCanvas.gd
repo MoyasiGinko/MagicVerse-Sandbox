@@ -20,6 +20,23 @@ extends CanvasLayer
 
 const NUM_OF_TIPS = 17
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	return Global.get_node_adapter()
+
+func _refresh_pause_permissions() -> void:
+	var change_map_button: Button = $PauseMenu/ScrollContainer/Pause/ChangeMap
+	var map_selector: MapList = $PauseMenu/ScrollContainer/Pause/MapList
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter == null:
+		change_map_button.visible = true
+		change_map_button.disabled = false
+		map_selector.disabled = false
+		return
+	var is_host: bool = adapter.is_server()
+	change_map_button.visible = is_host
+	change_map_button.disabled = !is_host
+	map_selector.disabled = !is_host
+
 func _ready() -> void:
 	$PauseMenu/ScrollContainer/Pause/ChangeMap.connect("pressed", _send_on_change_map_pressed)
 	$PauseMenu/ScrollContainer/Pause/SaveWorld.connect("pressed", _on_save_world_pressed)
@@ -49,6 +66,7 @@ func show_pause_menu() -> void:
 		$PauseMenu.visible = true
 		if Global.get_player() != null:
 			Global.get_player().locked = true
+		_refresh_pause_permissions()
 		# show tip on pause screen
 		var tipnum : int = randi() % NUM_OF_TIPS
 		pause_tip_text.text = JsonHandler.find_entry_in_file(str("tip/", tipnum))
@@ -69,6 +87,21 @@ func _process(delta : float) -> void:
 
 func _send_on_change_map_pressed() -> void:
 	var map_selector : MapList = $PauseMenu/ScrollContainer/Pause/MapList
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null:
+		if !adapter.is_server():
+			UIHandler.show_alert("Only the room host can change maps.", 4, false, UIHandler.alert_colour_error)
+			return
+		if map_selector.selected_lines.is_empty():
+			UIHandler.show_alert("No map selected.", 4, false, UIHandler.alert_colour_error)
+			return
+		Global.set_meta("current_room_map", map_selector.selected_name)
+		var packed_lines := PackedStringArray()
+		for line_value: Variant in map_selector.selected_lines:
+			packed_lines.append(str(line_value))
+		adapter.load_tbw(packed_lines)
+		UIHandler.show_alert(str("Loading world \"", map_selector.selected_name, "\" for all players..."), 4)
+		return
 	# load tbw with switching flag
 	# clients must wait 15s between loading worlds to avoid spam
 	Global.get_world().ask_server_to_open_tbw.rpc_id(1, Global.display_name, map_selector.selected_name, map_selector.selected_lines)

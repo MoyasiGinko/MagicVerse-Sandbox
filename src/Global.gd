@@ -446,7 +446,7 @@ func set_camera_max_dist(new : float = 40) -> void:
 		camera.set_max_dist(new)
 
 @rpc("any_peer", "call_local", "reliable")
-func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false, started_at_ms : int = 0) -> void:
+func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false, started_at_ms : int = 0, remaining_secs : int = -1) -> void:
 	for gm : Gamemode in get_world().gamemode_list:
 		if gm.running:
 			if not force_local:
@@ -458,6 +458,10 @@ func server_start_gamemode(idx : int, params : Array, mods : Array, force_local 
 			set_meta("pending_active_gamemode_started_at_ms", started_at_ms)
 		elif has_meta("pending_active_gamemode_started_at_ms"):
 			remove_meta("pending_active_gamemode_started_at_ms")
+		if force_local and remaining_secs > 0:
+			set_meta("pending_active_gamemode_remaining_secs", remaining_secs)
+		elif has_meta("pending_active_gamemode_remaining_secs"):
+			remove_meta("pending_active_gamemode_remaining_secs")
 		get_world().gamemode_list[idx].connect("gamemode_ended", _on_gamemode_ended.bind(idx))
 		get_world().gamemode_list[idx].start(params, mods, force_local)
 
@@ -466,6 +470,7 @@ func server_start_gamemode(idx : int, params : Array, mods : Array, force_local 
 			if adapter != null and adapter.is_server():
 				var started_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
 				adapter.send_rpc_call("remote_start_gamemode", [idx, params, mods, started_ms])
+				adapter.send_rpc_call("remote_gamemode_menu_sync", [idx, params, mods])
 
 		last_gamemode_idx = idx
 		last_gamemode_params = params

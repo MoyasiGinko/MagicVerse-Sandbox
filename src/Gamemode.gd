@@ -30,6 +30,17 @@ var time_limit_seconds : int = 600
 @onready var timer_ui : GameTimer = get_tree().current_scene.get_node("GameCanvas/Timer") as ProgressBar
 @onready var vote_panel : VotePanel = get_tree().current_scene.get_node("GameCanvas/VotePanel") as VotePanel
 
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	return Global.get_node_adapter()
+
+func _is_node_host() -> bool:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	return adapter != null and adapter.is_server()
+
+func _is_node_client_replica() -> bool:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	return adapter != null and !adapter.is_server()
+
 func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	# only server starts games
 	_force_local_sync = force_local
@@ -55,7 +66,13 @@ func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 		# the time limit chooser is in minutes but this is in
 		# seconds so we convert
 		time_limit_seconds = params[0] * 60
-	if _force_local_sync and Global.has_meta("pending_active_gamemode_started_at_ms"):
+	if _force_local_sync and Global.has_meta("pending_active_gamemode_remaining_secs"):
+		var remaining_var: Variant = Global.get_meta("pending_active_gamemode_remaining_secs")
+		var remaining_secs: int = int(remaining_var as float)
+		if remaining_secs > 0:
+			time_limit_seconds = remaining_secs
+		Global.remove_meta("pending_active_gamemode_remaining_secs")
+	elif _force_local_sync and Global.has_meta("pending_active_gamemode_started_at_ms"):
 		var started_var: Variant = Global.get_meta("pending_active_gamemode_started_at_ms")
 		var started_at_ms: int = int(started_var as float)
 		if started_at_ms > 0:
@@ -171,6 +188,12 @@ func run() -> void:
 	await preview_event.start()
 
 	running = true
+	if _is_node_client_replica():
+		if timer_ui != null:
+			timer_ui.set_visible_rpc(true)
+			timer_ui.set_max_val_rpc(time_limit_seconds)
+			timer_ui.apply_timer_from_node(gamemode_name, float(time_limit_seconds), time_limit_seconds)
+		return
 	# start default timer
 	game_timer.one_shot = true
 	game_timer.wait_time = time_limit_seconds
@@ -193,7 +216,16 @@ func update_timer() -> void:
 		return
 	if timer_ui == null or !is_instance_valid(timer_ui):
 		return
-	if _force_local_sync:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null:
+		if adapter.is_server():
+			var remaining: float = maxf(0.0, game_timer.time_left)
+			timer_ui.apply_timer_from_node(gamemode_name, remaining, time_limit_seconds)
+			adapter.send_rpc_call("remote_gamemode_timer_sync", [gamemode_name, remaining, time_limit_seconds], 0)
+		else:
+			# Node clients receive authoritative timer packets from host.
+			pass
+	elif _force_local_sync:
 		var timer_text : Label = timer_ui.get_node_or_null("Label")
 		if timer_text != null:
 			var mins := str(int(game_timer.time_left as int / 60))

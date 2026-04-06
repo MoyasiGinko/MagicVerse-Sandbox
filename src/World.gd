@@ -302,15 +302,113 @@ func remote_delete_tbw(obj_path : String, despawn : bool = false) -> void:
 	else:
 		node.queue_free()
 
-func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = [], _started_at_ms : int = 0) -> void:
+func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = [], _started_at_ms : int = 0, _remaining_secs : int = -1) -> bool:
 	var idx_int := _to_int(idx)
 	if idx_int < 0 or idx_int >= gamemode_list.size():
-		return
-	Global.server_start_gamemode(idx_int, params, mods, true, _started_at_ms)
+		if idx_int >= 0:
+			var keep_existing_pending: bool = false
+			if Global.has_meta("pending_active_gamemode"):
+				var pending_value: Variant = Global.get_meta("pending_active_gamemode")
+				if pending_value is Dictionary:
+					var existing_pending: Dictionary = pending_value as Dictionary
+					var existing_idx: int = int(existing_pending.get("index", -1) as float)
+					var existing_remaining: int = int(existing_pending.get("remainingSecs", -1) as float)
+					if existing_idx == idx_int and existing_remaining > 1 and _remaining_secs <= 1:
+						keep_existing_pending = true
+						print("[World] ⏭️ Ignoring degraded pending gamemode replay for idx=", idx_int, " remaining=", _remaining_secs, " existing_remaining=", existing_remaining)
+			if keep_existing_pending:
+				var main_keep: Node = get_tree().current_scene
+				if main_keep != null and main_keep.has_method("_schedule_pending_gamemode_retry"):
+					main_keep.call("_schedule_pending_gamemode_retry")
+				return false
+			Global.set_meta("pending_active_gamemode", {
+				"index": idx_int,
+				"params": params.duplicate(true),
+				"mods": mods.duplicate(true),
+				"startedAtMs": _started_at_ms,
+				"remainingSecs": _remaining_secs
+			})
+			var main: Node = get_tree().current_scene
+			if main != null and main.has_method("_schedule_pending_gamemode_retry"):
+				main.call("_schedule_pending_gamemode_retry")
+		return false
+	Global.server_start_gamemode(idx_int, params, mods, true, _started_at_ms, _remaining_secs)
+	return true
 
 func remote_end_gamemode() -> void:
 	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])
 	e.start()
+
+func remote_vote_show_panel(maps: Array) -> void:
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.show_panel(maps)
+
+func remote_vote_update_counts(votes: Dictionary) -> void:
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.update_player_votes(votes)
+
+func remote_vote_timer_update(seconds_left: int) -> void:
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.update_timer_rpc(seconds_left)
+
+func remote_vote_hide_panel() -> void:
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.hide_panel()
+
+func remote_vote_ended() -> void:
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.on_voting_ended_rpc()
+
+func remote_vote_submit(idx: int, from_peer_id: int) -> void:
+	var adapter: MultiplayerNodeAdapter = Global.get_node_adapter()
+	if adapter == null or !adapter.is_server():
+		return
+	var voting: VotePanel = get_tree().current_scene.get_node_or_null("GameCanvas/VotePanel") as VotePanel
+	if voting == null:
+		return
+	voting.apply_vote_from_peer(from_peer_id, idx)
+
+func remote_gamemode_timer_sync(gamemode_label: String, remaining_secs: float, max_time: int) -> void:
+	var timer_ui: GameTimer = get_tree().current_scene.get_node_or_null("GameCanvas/Timer") as GameTimer
+	if timer_ui == null:
+		return
+	timer_ui.apply_timer_from_node(gamemode_label, maxf(0.0, remaining_secs), max_time)
+
+func remote_gamemode_menu_sync(idx: int, params: Array, mods: Array) -> void:
+	var menu: Node = get_tree().current_scene.get_node_or_null("GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")
+	if menu == null or !menu.has_method("apply_remote_gamemode_state"):
+		Global.set_meta("pending_selected_gamemode", {
+			"index": idx,
+			"params": params.duplicate(true),
+			"mods": mods.duplicate(true)
+		})
+		var main_missing: Node = get_tree().current_scene
+		if main_missing != null and main_missing.has_method("_schedule_pending_selected_gamemode_retry"):
+			main_missing.call("_schedule_pending_selected_gamemode_retry")
+		return
+	if menu.has_method("get_selector_item_count"):
+		var selector_count: int = menu.call("get_selector_item_count") as int
+		if selector_count <= idx:
+			Global.set_meta("pending_selected_gamemode", {
+				"index": idx,
+				"params": params.duplicate(true),
+				"mods": mods.duplicate(true)
+			})
+			var main_not_ready: Node = get_tree().current_scene
+			if main_not_ready != null and main_not_ready.has_method("_schedule_pending_selected_gamemode_retry"):
+				main_not_ready.call("_schedule_pending_selected_gamemode_retry")
+			return
+	menu.call("apply_remote_gamemode_state", idx, params, mods)
 
 func remote_paint_brick(obj_path : String, colour_html : String) -> void:
 	var node := get_node_or_null(obj_path)

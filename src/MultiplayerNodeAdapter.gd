@@ -83,6 +83,8 @@ func _on_ws_message() -> void:
 			_handle_handshake_accepted(msg_data)
 		"state":
 			_handle_state(msg_data)
+		"tbw":
+			_handle_tbw(msg_data)
 		"rpc", "rpc_call":
 			_handle_rpc(msg_data)
 		"sync":
@@ -122,6 +124,11 @@ func _handle_room_created(data: Dictionary) -> void:
 
 	# For host: also trigger room_joined so player list gets populated
 	_is_server = (_peer_id == 1)
+	_current_host_peer_id = _peer_id
+	_connected_peers.clear()
+	_pending_members.clear()
+	room_members.clear()
+	room_members.append({"peerId": _peer_id, "name": Global.display_name, "isHost": true})
 	room_joined.emit(_peer_id, _room_id)  # Emit room_joined for host too
 
 	room_created.emit(_room_id)
@@ -187,6 +194,20 @@ func _handle_room_joined(data: Dictionary) -> void:
 	else:
 		if Global.has_meta("pending_active_gamemode"):
 			Global.remove_meta("pending_active_gamemode")
+
+	var selected_gamemode: Variant = data.get("selectedGamemode", null)
+	if selected_gamemode is Dictionary:
+		Global.set_meta("pending_selected_gamemode", (selected_gamemode as Dictionary).duplicate(true))
+	else:
+		if Global.has_meta("pending_selected_gamemode"):
+			Global.remove_meta("pending_selected_gamemode")
+
+	var current_tbw_value: Variant = data.get("currentTbw", [])
+	if current_tbw_value is Array and (current_tbw_value as Array).size() > 0:
+		Global.set_meta("pending_room_tbw", (current_tbw_value as Array).duplicate(true))
+	else:
+		if Global.has_meta("pending_room_tbw"):
+			Global.remove_meta("pending_room_tbw")
 
 	# Replay recent room chat so newly-joined users get synchronized context.
 	var chat_history: Array = data.get("chatHistory", []) as Array
@@ -771,6 +792,20 @@ func _handle_chat(data: Dictionary) -> void:
 	if text.strip_edges() == "":
 		return
 	chat_received.emit(from_peer, from_name, text, created_at)
+
+func _handle_tbw(data: Dictionary) -> void:
+	var lines_value: Variant = data.get("lines", [])
+	if not (lines_value is Array):
+		return
+	var lines: Array = (lines_value as Array).duplicate(true)
+	if lines.is_empty():
+		return
+	var world: World = Global.get_world()
+	if world == null:
+		Global.set_meta("pending_room_tbw", lines)
+		return
+	Global.set_meta("pending_room_tbw", lines)
+	world.open_tbw(lines)
 
 func send_player_state(position: Vector3, rotation: Vector3, velocity: Vector3, anim_state: int, anim_data: Dictionary) -> void:
 	"""Send local player state to server (position, rotation, velocity, animation state, animation blends)"""

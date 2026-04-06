@@ -25,6 +25,20 @@ type ClientSession = {
   accessToken: string | null;
 };
 
+type ActiveGamemodePayload = {
+  index: number;
+  params: unknown[];
+  mods: unknown[];
+  startedAtMs: number;
+  remainingSecs: number;
+};
+
+type SelectedGamemodePayload = {
+  index: number;
+  params: unknown[];
+  mods: unknown[];
+};
+
 const roomManager = new RoomManager();
 const clientSessions = new Map<WebSocket, ClientSession>();
 const roomRepo = new RoomRepository();
@@ -121,6 +135,100 @@ function validateJson(raw: string): Message | null {
   } catch {
     return null;
   }
+}
+
+function parseDbActiveGamemode(
+  dbRoom: ReturnType<RoomRepository["getRoomById"]>,
+): ActiveGamemodePayload | null {
+  if (!dbRoom) {
+    return null;
+  }
+  if (
+    dbRoom.active_gamemode_index === null ||
+    dbRoom.active_gamemode_started_at_ms === null
+  ) {
+    return null;
+  }
+
+  let params: unknown[] = [];
+  let mods: unknown[] = [];
+  try {
+    const parsedParams = dbRoom.active_gamemode_params
+      ? JSON.parse(dbRoom.active_gamemode_params)
+      : [];
+    params = Array.isArray(parsedParams) ? parsedParams : [];
+  } catch {
+    params = [];
+  }
+  try {
+    const parsedMods = dbRoom.active_gamemode_mods
+      ? JSON.parse(dbRoom.active_gamemode_mods)
+      : [];
+    mods = Array.isArray(parsedMods) ? parsedMods : [];
+  } catch {
+    mods = [];
+  }
+
+  return {
+    index: dbRoom.active_gamemode_index,
+    params,
+    mods,
+    startedAtMs: dbRoom.active_gamemode_started_at_ms,
+    remainingSecs: calculateRemainingSecs(
+      dbRoom.active_gamemode_started_at_ms,
+      params,
+    ),
+  };
+}
+
+function parseDbSelectedGamemode(
+  dbRoom: ReturnType<RoomRepository["getRoomById"]>,
+): SelectedGamemodePayload | null {
+  if (!dbRoom || dbRoom.selected_gamemode_index === null) {
+    return null;
+  }
+  let params: unknown[] = [];
+  let mods: unknown[] = [];
+  try {
+    const parsedParams = dbRoom.selected_gamemode_params
+      ? JSON.parse(dbRoom.selected_gamemode_params)
+      : [];
+    params = Array.isArray(parsedParams) ? parsedParams : [];
+  } catch {
+    params = [];
+  }
+  try {
+    const parsedMods = dbRoom.selected_gamemode_mods
+      ? JSON.parse(dbRoom.selected_gamemode_mods)
+      : [];
+    mods = Array.isArray(parsedMods) ? parsedMods : [];
+  } catch {
+    mods = [];
+  }
+  return {
+    index: dbRoom.selected_gamemode_index,
+    params,
+    mods,
+  };
+}
+
+function calculateRemainingSecs(
+  startedAtMs: number,
+  params: unknown[],
+): number {
+  const firstParam =
+    Array.isArray(params) && params.length > 0 ? params[0] : 10;
+  const minutesRaw =
+    typeof firstParam === "number"
+      ? firstParam
+      : Number.parseInt(String(firstParam ?? 10), 10);
+  const totalSecs = Math.max(
+    1,
+    Math.floor((Number.isFinite(minutesRaw) ? minutesRaw : 10) * 60),
+  );
+  const nowMs = Date.now();
+  const elapsedSecs = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
+  return Math.max(1, totalSecs - elapsedSecs);
 }
 
 function validateSessionIdentity(
@@ -734,6 +842,21 @@ export function setupWebSocket(server: http.Server) {
 
           const members = roomManager.getRoomMembers(roomId);
           const chatHistory = roomRepo.getRecentRoomChatMessages(roomId, 100);
+          const activeGamemodePayload: ActiveGamemodePayload | null =
+            updatedRoom.activeGamemode === null
+              ? parseDbActiveGamemode(dbRoom)
+              : {
+                  index: updatedRoom.activeGamemode.index,
+                  params: updatedRoom.activeGamemode.params,
+                  mods: updatedRoom.activeGamemode.mods,
+                  startedAtMs: updatedRoom.activeGamemode.startedAtMs,
+                  remainingSecs: calculateRemainingSecs(
+                    updatedRoom.activeGamemode.startedAtMs,
+                    updatedRoom.activeGamemode.params,
+                  ),
+                };
+          const selectedGamemodePayload: SelectedGamemodePayload | null =
+            parseDbSelectedGamemode(dbRoom);
           console.log(
             `[WebSocket] 👥 Room ${roomId} members:`,
             members.map((m) => `peer=${m.peerId} name=${m.name}`),
@@ -754,15 +877,8 @@ export function setupWebSocket(server: http.Server) {
             gamemode: dbRoom?.gamemode || "Deathmatch",
             mapName: dbRoom?.map_name || "Frozen Field",
             currentTbw: updatedRoom.currentTbw,
-            activeGamemode:
-              updatedRoom.activeGamemode === null
-                ? null
-                : {
-                    index: updatedRoom.activeGamemode.index,
-                    params: updatedRoom.activeGamemode.params,
-                    mods: updatedRoom.activeGamemode.mods,
-                    startedAtMs: updatedRoom.activeGamemode.startedAtMs,
-                  },
+            activeGamemode: activeGamemodePayload,
+            selectedGamemode: selectedGamemodePayload,
             chatHistory: chatHistory.map((entry) => ({
               from: entry.sender_peer_id ?? 0,
               fromName: entry.sender_name,
@@ -1140,8 +1256,30 @@ export function setupWebSocket(server: http.Server) {
               Array.isArray(modsRaw) ? modsRaw : [],
               startedAtMs,
             );
+            roomRepo.setActiveGamemodeState(
+              room.id,
+              idx,
+              Array.isArray(paramsRaw) ? paramsRaw : [],
+              Array.isArray(modsRaw) ? modsRaw : [],
+              startedAtMs,
+            );
           } else if (method === "remote_end_gamemode" && senderIsHost) {
             roomManager.clearActiveGamemode(room.id);
+            roomRepo.clearActiveGamemodeState(room.id);
+          } else if (method === "remote_gamemode_menu_sync" && senderIsHost) {
+            const idxRaw = Array.isArray(args) ? args[0] : undefined;
+            const paramsRaw = Array.isArray(args) ? args[1] : [];
+            const modsRaw = Array.isArray(args) ? args[2] : [];
+            const idx =
+              typeof idxRaw === "number"
+                ? Math.max(0, Math.floor(idxRaw))
+                : Number.parseInt(String(idxRaw ?? 0), 10) || 0;
+            roomRepo.setSelectedGamemodeState(
+              room.id,
+              idx,
+              Array.isArray(paramsRaw) ? paramsRaw : [],
+              Array.isArray(modsRaw) ? modsRaw : [],
+            );
           }
 
           if (

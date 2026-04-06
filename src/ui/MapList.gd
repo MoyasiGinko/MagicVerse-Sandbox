@@ -26,6 +26,7 @@ class_name MapList
 @onready var user_uploaded_list : GridContainer = $"TabContainer/World Browser (Online)/ScrollContainer/ItemList"
 @onready var all_lists : Array = [built_in, your_maps, user_uploaded]
 @onready var window : Control = $TabContainer
+@onready var tabs : TabContainer = $TabContainer
 
 @onready var search : LineEdit = $"TabContainer/World Browser (Online)/Header/FilterOptions/Search"
 
@@ -35,6 +36,19 @@ var selected_name : String = ""
 var selected_lines : Array = []
 var _map_downloaded : bool = false
 var first_open : bool = true
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	return Global.get_node_adapter()
+
+func _apply_world_browser_visibility() -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter == null:
+		tabs.set_tab_hidden(2, false)
+		return
+	var is_host: bool = adapter.is_server()
+	tabs.set_tab_hidden(2, !is_host)
+	if not is_host and tabs.current_tab == 2:
+		tabs.current_tab = 0
 
 func add_map(file_name : String, list : Control, can_delete : bool = false, lines : Array = [], id : int = -1) -> void:
 	if lines.is_empty():
@@ -125,6 +139,7 @@ func _ready() -> void:
 		connect("visibility_changed", _on_visibility_changed)
 	search.connect("text_changed", _on_search)
 	window.connect("tab_changed", _on_tab_changed)
+	_apply_world_browser_visibility()
 	refresh()
 
 	# Try to load the currently active map from Global metadata
@@ -166,6 +181,7 @@ func _on_search(what : String) -> void:
 func _on_visibility_changed() -> void:
 	if get_tree() == null:
 		return
+	_apply_world_browser_visibility()
 
 	if first_open:
 		refresh_user_uploaded()

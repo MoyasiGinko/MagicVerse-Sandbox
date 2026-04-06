@@ -23,6 +23,79 @@ var buttons : Array = []
 var maps : Array = []
 var player_votes : Dictionary = {}
 var vote_timer : Timer
+var _pending_selected_map_name: String = ""
+
+func _get_node_adapter() -> MultiplayerNodeAdapter:
+	return Global.get_node_adapter()
+
+func _is_node_host() -> bool:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	return adapter != null and adapter.is_server()
+
+func _is_vote_authority() -> bool:
+	if _is_node_host():
+		return true
+	return multiplayer.is_server()
+
+func _get_active_vote_member_count() -> int:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null:
+		var room_member_count: int = adapter.room_members.size()
+		if room_member_count > 0:
+			return room_member_count
+	var world: World = Global.get_world()
+	if world == null:
+		return 0
+	return world.rigidplayer_list.size()
+
+func _broadcast_vote_timer(seconds_left: int) -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		adapter.send_rpc_call("remote_vote_timer_update", [seconds_left], 0)
+	update_timer_rpc(seconds_left)
+
+func _broadcast_vote_counts() -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		adapter.send_rpc_call("remote_vote_update_counts", [player_votes], 0)
+	update_player_votes(player_votes)
+
+func _broadcast_show_panel() -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		adapter.send_rpc_call("remote_vote_show_panel", [maps], 0)
+	show_panel(maps)
+
+func _broadcast_voting_ended() -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		adapter.send_rpc_call("remote_vote_ended", [], 0)
+	on_voting_ended_rpc()
+
+func _broadcast_hide_panel() -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server():
+		adapter.send_rpc_call("remote_vote_hide_panel", [], 0)
+	hide_panel()
+
+func _open_selected_map_lines(selected_lines: Array, selected_name: String) -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	Global.set_meta("current_room_map", selected_name)
+	if adapter != null and adapter.is_server():
+		var packed_lines := PackedStringArray()
+		for line_value: Variant in selected_lines:
+			packed_lines.append(str(line_value))
+		adapter.load_tbw(packed_lines)
+		return
+	Global.get_world().open_tbw(selected_lines)
+
+func apply_vote_from_peer(from_peer_id: int, idx: int) -> void:
+	if !_is_vote_authority():
+		return
+	if idx < 0 or idx > 5:
+		return
+	player_votes[str(from_peer_id)] = idx
+	_broadcast_vote_counts()
 
 func _ready() -> void:
 	super()
@@ -41,7 +114,7 @@ func _ready() -> void:
 
 # only runs as server
 func start_voting() -> void:
-	if !multiplayer.is_server():
+	if !_is_vote_authority():
 		return
 	maps = []
 	player_votes = {}
@@ -55,11 +128,11 @@ func start_voting() -> void:
 		push_error("An error occurred in the HTTP request.")
 
 func update_timer() -> void:
-	if player_votes.size() >= Global.get_world().rigidplayer_list.size():
+	if player_votes.size() >= _get_active_vote_member_count():
 		vote_timer.stop()
 		_on_vote_timeout()
 	if !vote_timer.is_stopped():
-		update_timer_rpc.rpc(vote_timer.time_left)
+		_broadcast_vote_timer(int(vote_timer.time_left))
 		await get_tree().create_timer(1).timeout
 		update_timer()
 
@@ -74,7 +147,7 @@ func on_voting_ended_rpc() -> void:
 
 # runs as server
 func _on_vote_timeout() -> void:
-	on_voting_ended_rpc.rpc()
+	_broadcast_voting_ended()
 	var votes : Array = [0, 0, 0, 0, 0, 0]
 	for vote : int in player_votes.values():
 		votes[vote] += 1
@@ -92,7 +165,10 @@ func _on_vote_timeout() -> void:
 	match (highest_vote):
 		4:
 			# replay
-			Global.server_start_gamemode.rpc_id(1, Global.last_gamemode_idx, Global.last_gamemode_params, Global.last_gamemode_mods)
+			if _is_node_host():
+				Global.server_start_gamemode(Global.last_gamemode_idx, Global.last_gamemode_params, Global.last_gamemode_mods)
+			else:
+				Global.server_start_gamemode.rpc_id(1, Global.last_gamemode_idx, Global.last_gamemode_params, Global.last_gamemode_mods)
 		5:
 			# sandbox
 			var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
@@ -120,9 +196,11 @@ func _on_vote_timeout() -> void:
 
 			# built-in
 			if map_id == -1:
-				Global.get_world().open_tbw(Global.get_tbw_lines(str(maps[highest_vote]["name"])))
+				var selected_name: String = str(maps[highest_vote]["name"])
+				_open_selected_map_lines(Global.get_tbw_lines(selected_name), selected_name)
 			else:
 				# browser
+				_pending_selected_map_name = str(maps[highest_vote]["name"])
 				var req : HTTPRequest = HTTPRequest.new()
 				add_child(req)
 				req.request_completed.connect(self._switch_map)
@@ -130,7 +208,7 @@ func _on_vote_timeout() -> void:
 				var error := req.request(str(UserPreferences.database_repo, "?id=", map_id))
 				if error != OK:
 					push_error("An error occurred in the HTTP request.")
-	hide_panel.rpc()
+	_broadcast_hide_panel()
 
 func _switch_map(result : int, response_code : int, headers : PackedStringArray, body : PackedByteArray) -> void:
 	# get full map tbw now that map has been selected
@@ -141,7 +219,7 @@ func _switch_map(result : int, response_code : int, headers : PackedStringArray,
 		if response[0] is Dictionary:
 			if response[0].has("tbw"):
 				var lines : PackedStringArray = str(response[0]["tbw"]).split("\n")
-				Global.get_world().open_tbw(lines)
+				_open_selected_map_lines(lines, _pending_selected_map_name)
 
 func _maps_request_completed(result : int, response_code : int, headers : PackedStringArray, body : PackedByteArray) -> void:
 	if (response_code != 200):
@@ -196,12 +274,12 @@ func _maps_request_completed(result : int, response_code : int, headers : Packed
 		var fallback_name : String = built_in_maps.pick_random()
 		maps.append({"name": fallback_name, "id": -1, "image": "-1", "author": "Tinybox"})
 		built_in_maps.pop_at(built_in_maps.find(fallback_name))
-	show_panel.rpc(maps)
+	_broadcast_show_panel()
 
 @rpc("any_peer", "call_local", "reliable")
 func show_panel(maps : Array) -> void:
 	player_votes = {}
-	update_player_votes.rpc(player_votes)
+	update_player_votes(player_votes)
 
 	visible = true
 	var map_count : int = mini(4, maps.size())
@@ -215,6 +293,8 @@ func show_panel(maps : Array) -> void:
 		buttons[i].disabled = false
 		buttons[i].get_node("Split/Labels/Title").text = maps[i]["name"]
 		buttons[i].get_node("Split/Labels/Author").text = str("by ", maps[i]["author"])
+		if buttons[i].is_connected("pressed", _on_vote):
+			buttons[i].disconnect("pressed", _on_vote)
 		buttons[i].connect("pressed", _on_vote.bind(i))
 		var image : Variant
 		# built-in
@@ -228,12 +308,23 @@ func show_panel(maps : Array) -> void:
 			image.resize(240, 162)
 			tex = ImageTexture.create_from_image(image as Image)
 			buttons[i].get_node("Split/Image").texture = tex
+	if buttons[4].is_connected("pressed", _on_vote):
+		buttons[4].disconnect("pressed", _on_vote)
+	if buttons[5].is_connected("pressed", _on_vote):
+		buttons[5].disconnect("pressed", _on_vote)
 	buttons[4].connect("pressed", _on_vote.bind(4))
 	buttons[5].connect("pressed", _on_vote.bind(5))
 
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 func _on_vote(idx : int) -> void:
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null:
+		if adapter.is_server():
+			apply_vote_from_peer(adapter.get_unique_peer_id(), idx)
+		else:
+			adapter.send_rpc_call("remote_vote_submit", [idx, adapter.get_unique_peer_id()], 1)
+		return
 	send_vote_to_server.rpc_id(1, idx)
 
 @rpc("any_peer", "call_local", "reliable")
