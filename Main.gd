@@ -847,12 +847,12 @@ func _sync_active_gamemode_to_joiner(peer_id: int) -> void:
 		var can_send_precise_start: bool = false
 		if gm.game_timer != null and is_instance_valid(gm.game_timer):
 			var total_secs: int = maxi(1, gm.time_limit_seconds)
-			remaining_secs = maxi(1, int(gm.game_timer.time_left))
+			remaining_secs = maxi(1, int(ceili(gm.game_timer.time_left)))
 			var elapsed_secs: int = maxi(0, total_secs - remaining_secs)
 			started_at_ms -= elapsed_secs * 1000
 			can_send_precise_start = remaining_secs > 1
 		elif gm.timer_ui != null and is_instance_valid(gm.timer_ui):
-			var ui_remaining: int = maxi(0, int(gm.timer_ui.value))
+			var ui_remaining: int = maxi(0, int(ceili(gm.timer_ui.value)))
 			var ui_total: int = maxi(1, int(gm.timer_ui.max_value))
 			if ui_remaining > 1:
 				remaining_secs = ui_remaining

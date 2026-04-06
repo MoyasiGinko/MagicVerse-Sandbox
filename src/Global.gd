@@ -445,6 +445,16 @@ func set_camera_max_dist(new : float = 40) -> void:
 	if camera is Camera:
 		camera.set_max_dist(new)
 
+func _estimate_gamemode_preview_delay_ms() -> int:
+	var world: World = get_world()
+	if world == null:
+		return 0
+	for obj: Node in world.get_children():
+		if obj is CameraPreviewPoint:
+			# Event.SHOW_WORLD_PREVIEW waits 10s when preview points exist.
+			return 10000
+	return 0
+
 @rpc("any_peer", "call_local", "reliable")
 func server_start_gamemode(idx : int, params : Array, mods : Array, force_local : bool = false, started_at_ms : int = 0, remaining_secs : int = -1) -> void:
 	for gm : Gamemode in get_world().gamemode_list:
@@ -468,7 +478,7 @@ func server_start_gamemode(idx : int, params : Array, mods : Array, force_local 
 		if not force_local:
 			var adapter: MultiplayerNodeAdapter = get_node_adapter()
 			if adapter != null and adapter.is_server():
-				var started_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+				var started_ms: int = int(Time.get_unix_time_from_system() * 1000.0) + _estimate_gamemode_preview_delay_ms()
 				adapter.send_rpc_call("remote_start_gamemode", [idx, params, mods, started_ms])
 				adapter.send_rpc_call("remote_gamemode_menu_sync", [idx, params, mods])
 
