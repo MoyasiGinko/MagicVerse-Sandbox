@@ -41,13 +41,26 @@ func _is_node_client_replica() -> bool:
 	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
 	return adapter != null and !adapter.is_server()
 
+func _connect_player_join_sync() -> void:
+	if multiplayer.is_server() and !multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.connect(_on_peer_connected)
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and !adapter.peer_connected.is_connected(_on_peer_connected):
+		adapter.peer_connected.connect(_on_peer_connected)
+
+func _disconnect_player_join_sync() -> void:
+	if multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.disconnect(_on_peer_connected)
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.peer_connected.is_connected(_on_peer_connected):
+		adapter.peer_connected.disconnect(_on_peer_connected)
+
 func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 	# only server starts games
 	_force_local_sync = force_local
 	if !multiplayer.is_server() and !_force_local_sync: return
 	# make sure if someone joins mid-game the properties sync
-	if multiplayer.is_server():
-		multiplayer.peer_connected.connect(_on_peer_connected)
+	_connect_player_join_sync()
 
 	params = _params
 	mods = _mods
@@ -276,6 +289,7 @@ func update_timer() -> void:
 func end(params : Array) -> void:
 	# only server ends games
 	if !multiplayer.is_server() and !_force_local_sync: return
+	_disconnect_player_join_sync()
 	print(get_multiplayer_authority(), " - Ended gamemode: ", gamemode_name)
 	# cleanup and run any final stuff
 	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()

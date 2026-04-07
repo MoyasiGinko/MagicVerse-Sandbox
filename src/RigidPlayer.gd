@@ -468,11 +468,16 @@ func _receive_server_max_health(new : int) -> void:
 		max_health = new
 
 func set_max_health(new : int) -> void:
-	# only runs as server
-	if !multiplayer.is_server():
+	# ENet path: server authoritative only.
+	# Node path: allow local synchronized apply during active gamemode replay.
+	var adapter := _get_node_adapter()
+	if !multiplayer.is_server() and adapter == null:
 		return
-	# send updated health to clients
-	_receive_server_max_health.rpc(new)
+	# send updated health to clients (ENet) or apply locally (Node)
+	if adapter != null:
+		_receive_server_max_health(new)
+	else:
+		_receive_server_max_health.rpc(new)
 
 	max_health = new
 	if health > max_health:
@@ -2244,14 +2249,16 @@ func exited_water() -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func set_move_speed(new : int) -> void:
-	# if this change state request is not from the server
-	if multiplayer.get_remote_sender_id() != 1: return
+	# ENet accepts server RPC sender; Node accepts local synchronized calls (sender 0).
+	if multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0:
+		return
 	move_speed = new
 
 @rpc("any_peer", "call_local", "reliable")
 func set_jump_force(new : float) -> void:
-	# if this change state request is not from the server
-	if multiplayer.get_remote_sender_id() != 1: return
+	# ENet accepts server RPC sender; Node accepts local synchronized calls (sender 0).
+	if multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0:
+		return
 	jump_force = new
 
 func align_character_model_normal(ground_normal : Vector3) -> void:
