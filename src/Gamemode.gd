@@ -66,20 +66,30 @@ func start(_params : Array, _mods : Array, force_local : bool = false) -> void:
 		# the time limit chooser is in minutes but this is in
 		# seconds so we convert
 		time_limit_seconds = params[0] * 60
-	if _force_local_sync and Global.has_meta("pending_active_gamemode_remaining_secs"):
+	if _force_local_sync and Global.has_meta("pending_active_gamemode_started_at_ms"):
+		var started_var: Variant = Global.get_meta("pending_active_gamemode_started_at_ms")
+		var started_at_ms: int = int(started_var as float)
+		if started_at_ms > 0:
+			var now_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
+			if Global.has_meta("pending_active_gamemode_server_now_ms"):
+				var server_now_var: Variant = Global.get_meta("pending_active_gamemode_server_now_ms")
+				var server_now_ms: int = int(server_now_var as float)
+				if server_now_ms > 0:
+					now_ms = server_now_ms
+			if _is_node_client_replica():
+				# Node replicas show timer after preview; account for that elapsed time up front.
+				now_ms += 10000
+			var elapsed_secs: int = maxi(0, int((now_ms - started_at_ms) / 1000))
+			time_limit_seconds = maxi(1, time_limit_seconds - elapsed_secs)
+		Global.remove_meta("pending_active_gamemode_started_at_ms")
+		if Global.has_meta("pending_active_gamemode_server_now_ms"):
+			Global.remove_meta("pending_active_gamemode_server_now_ms")
+	elif _force_local_sync and Global.has_meta("pending_active_gamemode_remaining_secs"):
 		var remaining_var: Variant = Global.get_meta("pending_active_gamemode_remaining_secs")
 		var remaining_secs: int = int(remaining_var as float)
 		if remaining_secs > 0:
 			time_limit_seconds = remaining_secs
 		Global.remove_meta("pending_active_gamemode_remaining_secs")
-	elif _force_local_sync and Global.has_meta("pending_active_gamemode_started_at_ms"):
-		var started_var: Variant = Global.get_meta("pending_active_gamemode_started_at_ms")
-		var started_at_ms: int = int(started_var as float)
-		if started_at_ms > 0:
-			var now_ms: int = int(Time.get_unix_time_from_system() * 1000.0)
-			var elapsed_secs: int = maxi(0, int((now_ms - started_at_ms) / 1000))
-			time_limit_seconds = maxi(1, time_limit_seconds - elapsed_secs)
-		Global.remove_meta("pending_active_gamemode_started_at_ms")
 	run()
 
 # Sync parameters on player join.
@@ -112,6 +122,7 @@ func set_parameters(p : RigidPlayer) -> void:
 		if mods.size() > 3:
 			Global.get_world().get_current_map().set_gravity(mods[3] as bool)
 	else:
+		var adapter: MultiplayerNodeAdapter = _get_node_adapter()
 		p.get_tool_inventory().delete_all_tools.rpc()
 		if mods.size() > 0:
 			p.set_move_speed.rpc(mods[0] as float)
@@ -120,6 +131,8 @@ func set_parameters(p : RigidPlayer) -> void:
 			p.set_max_health(mods[1] as int)
 			# fill the health
 			p.set_health(p.max_health as int)
+			if adapter != null and adapter.is_server() and !p.is_local_player:
+				adapter.send_rpc_call("remote_set_health", [p.get_multiplayer_authority(), p.max_health], p.get_multiplayer_authority())
 		if mods.size() > 2:
 			# jump force is a multiplier
 			p.set_jump_force.rpc(2.4 * mods[2] as float)
@@ -184,16 +197,37 @@ func _reset_teams_to_default_local() -> void:
 func run() -> void:
 	# only server starts games
 	if !multiplayer.is_server() and !_force_local_sync: return
-	var preview_event : Event = Event.new(Event.EventType.SHOW_WORLD_PREVIEW, [gamemode_name, gamemode_subtitle])
-	await preview_event.start()
-
-	running = true
 	if _is_node_client_replica():
+		var game_canvas: CanvasItem = get_tree().current_scene.get_node_or_null("GameCanvas") as CanvasItem
+		if game_canvas != null:
+			game_canvas.visible = false
+		var cam: Camera = get_viewport().get_camera_3d() as Camera
+		if cam != null:
+			cam.play_preview_animation(10)
+		UIHandler.play_preview_animation_overlay(gamemode_name, gamemode_subtitle)
+		await get_tree().create_timer(10).timeout
+		if game_canvas != null:
+			game_canvas.visible = true
+		running = true
 		if timer_ui != null:
 			timer_ui.set_visible_rpc(true)
 			timer_ui.set_max_val_rpc(time_limit_seconds)
 			timer_ui.apply_timer_from_node(gamemode_name, float(time_limit_seconds), time_limit_seconds)
 		return
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and adapter.is_server() and !_force_local_sync:
+		var world_pre: World = Global.get_world()
+		if world_pre != null:
+			var gm_idx_pre: int = world_pre.gamemode_list.find(self)
+			if gm_idx_pre >= 0:
+				var preview_duration_ms: int = 10000
+				var started_ms_pre: int = int(Time.get_unix_time_from_system() * 1000.0) + preview_duration_ms
+				adapter.send_rpc_call("remote_start_gamemode", [gm_idx_pre, params.duplicate(true), mods.duplicate(true), started_ms_pre], 0)
+				adapter.send_rpc_call("remote_gamemode_menu_sync", [gm_idx_pre, params.duplicate(true), mods.duplicate(true)], 0)
+	var preview_event : Event = Event.new(Event.EventType.SHOW_WORLD_PREVIEW, [gamemode_name, gamemode_subtitle])
+	await preview_event.start()
+
+	running = true
 	# start default timer
 	game_timer.one_shot = true
 	game_timer.wait_time = time_limit_seconds

@@ -49,7 +49,7 @@ func _on_map_loaded() -> void:
 		water_type_button.connect("pressed", (editor as Editor).switch_water_type.bind(water_type_button.get_path()))
 		env_button.connect("pressed", (editor as Editor).switch_environment)
 		bg_button.connect("pressed", (editor as Editor).switch_background)
-		
+
 		# map property adjusters
 		grav_slider.connect("value_changed", (editor as Editor).set_gravity_scale)
 		water_height_adj.connect("value_changed", (editor as Editor).adjust_water_height)
@@ -58,17 +58,17 @@ func _on_map_loaded() -> void:
 		respawn_time_adj.connect("value_changed", (editor as Editor).adjust_respawn_time)
 		respawn_time_adj.max = 10
 		respawn_time_adj.min = 1
-		
+
 		$EntryScreen/Panel/Menu/New.connect("pressed", _on_new_world_pressed)
 		$EntryScreen/Panel/Menu/Load.connect("pressed", _on_load_world_pressed.bind($EntryScreen/Panel/Menu/MapList))
 		$PauseMenu/ScrollContainer/Sections/Editor/Load.connect("pressed", _on_load_world_pressed.bind($PauseMenu/ScrollContainer/Sections/Editor/MapList, true))
 		$PauseMenu/ScrollContainer/Sections/Editor/TestWorld.connect("pressed", _on_test_world_pressed.bind(false))
 		$PauseMenu/ScrollContainer/Sections/Editor/TestWorldAtSpot.connect("pressed", _on_test_world_pressed.bind(true))
-		
+
 		$EntryScreen/Panel/Menu/New.grab_focus()
-		
+
 		options_button.connect("pressed", toggle_pause_menu)
-		
+
 		# disable tools for entry screen
 		editor.editor_tool_inventory.set_disabled(true)
 
@@ -88,14 +88,19 @@ func _on_new_world_pressed() -> void:
 	$EntryScreen.set_visible(false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
-func _on_load_world_pressed(map_selector : MapList, confirm := false) -> void:
+func _on_load_world_pressed(map_selector: Node, confirm := false) -> void:
 	if confirm:
 		var actions := UIHandler.show_alert_with_actions("Are you sure? Any unsaved changes will be lost.", ["Load world", "Cancel"], true)
 		actions[0].connect("pressed", _load_world.bind(map_selector))
 	else:
 		_load_world(map_selector)
 
-func _load_world(map_selector : MapList) -> void:
+func _load_world(map_selector: Node) -> void:
+	if map_selector == null:
+		return
+	var selected_lines: Array = map_selector.get("selected_lines") as Array
+	var selected_name_value: Variant = map_selector.get("selected_name")
+	var selected_name: String = "" if selected_name_value == null else str(selected_name_value)
 	# delete old environment
 	var editor : Node3D = Global.get_world().get_current_map()
 	if editor is Editor:
@@ -104,9 +109,9 @@ func _load_world(map_selector : MapList) -> void:
 	$EntryScreen.set_visible(false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	# remove ".tbw" from string
-	Global.get_world().open_tbw(map_selector.selected_lines)
+	Global.get_world().open_tbw(selected_lines)
 	# set save field name to loaded world name
-	world_name.text = str(map_selector.selected_name)
+	world_name.text = selected_name
 	# wait so that we don't place a brick on the same frame as action click
 	await get_tree().process_frame
 	if editor is Editor:

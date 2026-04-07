@@ -42,7 +42,7 @@ var is_loading_maps: bool = false
 var backend: GlobalPlayMenuBackend
 
 @onready var gamemode_dropdown: OptionButton = $VBoxContainer/GamemodeContainer/GamemodeDropdown
-@onready var map_list: MapList = $VBoxContainer/MapList
+@onready var map_list: Node = $VBoxContainer/MapList
 @onready var max_players_spin: SpinBox = $VBoxContainer/MaxPlayersContainer/MaxPlayersSpin
 @onready var public_toggle: CheckButton = $VBoxContainer/PublicContainer/PublicToggle
 @onready var create_button: Button = $VBoxContainer/ButtonContainer/CreateButton
@@ -166,7 +166,8 @@ func _on_create_pressed() -> void:
 		return
 
 	var gamemode: String = gamemode_dropdown.get_item_text(gamemode_dropdown.get_selected_id())
-	var map_name: String = map_list.selected_name
+	var selected_name_value: Variant = map_list.get("selected_name")
+	var map_name: String = "Frozen Field" if selected_name_value == null else str(selected_name_value)
 	var max_players: int = int(max_players_spin.value)
 	var is_public: bool = public_toggle.button_pressed
 

@@ -179,8 +179,8 @@ func _handle_room_joined(data: Dictionary) -> void:
 			# DON'T add to pending_members - Main.gd will spawn from room_members
 			# pending_members is only for peers that join AFTER world is loaded
 
-	# Peer 1 is always the host in the Node backend
-	_is_server = (_peer_id == 1)
+	# Host authority comes from backend membership metadata.
+	_is_server = (_peer_id == _current_host_peer_id)
 
 	print("[NodeAdapter] ✅ Room joined: ", _room_id, " peers=", _connected_peers.size(), " (is_server=", _is_server, ")")
 

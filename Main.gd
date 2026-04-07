@@ -1172,8 +1172,10 @@ func _apply_pending_node_gamemode_state() -> void:
 	var mods: Array = gm.get("mods", []) as Array
 	var started_at_ms: int = int(gm.get("startedAtMs", 0) as float)
 	var remaining_secs: int = int(gm.get("remainingSecs", -1) as float)
+	var server_now_ms: int = int(gm.get("serverNowMs", 0) as float)
+	var total_secs: int = int(gm.get("totalSecs", -1) as float)
 	print("[Main] 🎮 Replaying active room gamemode idx=", idx)
-	if $World.remote_start_gamemode(idx, params, mods, started_at_ms, remaining_secs):
+	if $World.remote_start_gamemode(idx, params, mods, started_at_ms, remaining_secs, server_now_ms, total_secs):
 		Global.remove_meta("pending_active_gamemode")
 		_pending_gamemode_retry_scheduled = false
 	else:

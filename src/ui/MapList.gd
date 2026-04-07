@@ -139,6 +139,9 @@ func _ready() -> void:
 		connect("visibility_changed", _on_visibility_changed)
 	search.connect("text_changed", _on_search)
 	window.connect("tab_changed", _on_tab_changed)
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	if adapter != null and not adapter.host_changed.is_connected(_on_node_host_changed):
+		adapter.host_changed.connect(_on_node_host_changed)
 	_apply_world_browser_visibility()
 	refresh()
 
@@ -209,6 +212,9 @@ func _on_visibility_changed() -> void:
 		disabled = false
 		if associated_button != null:
 			associated_button.disabled = false
+
+func _on_node_host_changed(_new_host_peer_id: int, _is_me_host: bool) -> void:
+	_apply_world_browser_visibility()
 
 func _on_tab_changed(idx : int) -> void:
 	if idx == 2:

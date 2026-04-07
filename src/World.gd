@@ -219,7 +219,11 @@ func remote_set_health(peer_id : Variant, new_health : int, cause_of_death : int
 	if player == null:
 		return
 	if player.is_local_player:
-		player.set_health(new_health, cause_of_death, executor_id)
+		# Authoritative sync packets (no cause/executor) must apply even during spawn protection.
+		if cause_of_death == -1 && executor_id == -1:
+			player._receive_server_health(new_health, executor_id)
+		else:
+			player.set_health(new_health, cause_of_death, executor_id)
 	else:
 		player._receive_server_health(new_health, executor_id)
 
@@ -302,7 +306,7 @@ func remote_delete_tbw(obj_path : String, despawn : bool = false) -> void:
 	else:
 		node.queue_free()
 
-func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = [], _started_at_ms : int = 0, _remaining_secs : int = -1) -> bool:
+func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = [], _started_at_ms : int = 0, _remaining_secs : int = -1, _server_now_ms : int = 0, _total_secs : int = -1) -> bool:
 	var idx_int := _to_int(idx)
 	if idx_int < 0 or idx_int >= gamemode_list.size():
 		if idx_int >= 0:
@@ -326,13 +330,15 @@ func remote_start_gamemode(idx : Variant, params : Array = [], mods : Array = []
 				"params": params.duplicate(true),
 				"mods": mods.duplicate(true),
 				"startedAtMs": _started_at_ms,
-				"remainingSecs": _remaining_secs
+				"remainingSecs": _remaining_secs,
+				"serverNowMs": _server_now_ms,
+				"totalSecs": _total_secs
 			})
 			var main: Node = get_tree().current_scene
 			if main != null and main.has_method("_schedule_pending_gamemode_retry"):
 				main.call("_schedule_pending_gamemode_retry")
 		return false
-	Global.server_start_gamemode(idx_int, params, mods, true, _started_at_ms, _remaining_secs)
+	Global.server_start_gamemode(idx_int, params, mods, true, _started_at_ms, _remaining_secs, _server_now_ms, _total_secs)
 	return true
 
 func remote_end_gamemode() -> void:
@@ -378,11 +384,15 @@ func remote_vote_submit(idx: int, from_peer_id: int) -> void:
 		return
 	voting.apply_vote_from_peer(from_peer_id, idx)
 
-func remote_gamemode_timer_sync(gamemode_label: String, remaining_secs: float, max_time: int) -> void:
+func remote_gamemode_timer_sync(gamemode_label: String, remaining_secs: float, max_time: int, server_now_ms: int = 0, started_at_ms: int = 0) -> void:
 	var timer_ui: GameTimer = get_tree().current_scene.get_node_or_null("GameCanvas/Timer") as GameTimer
 	if timer_ui == null:
 		return
-	timer_ui.apply_timer_from_node(gamemode_label, maxf(0.0, remaining_secs), max_time)
+	var resolved_remaining: float = maxf(0.0, remaining_secs)
+	if server_now_ms > 0 and started_at_ms > 0 and max_time > 0:
+		var elapsed_secs: int = maxi(0, int((server_now_ms - started_at_ms) / 1000))
+		resolved_remaining = float(maxi(1, max_time - elapsed_secs))
+	timer_ui.apply_timer_from_node(gamemode_label, resolved_remaining, max_time)
 
 func remote_gamemode_menu_sync(idx: int, params: Array, mods: Array) -> void:
 	var menu: Node = get_tree().current_scene.get_node_or_null("GameCanvas/PauseMenu/ScrollContainer/Pause/GamemodeMenu")

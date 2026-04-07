@@ -25,6 +25,8 @@ var _authoritative_label: String = ""
 var _last_server_time_s: float = -1.0
 var _last_server_received_ms: int = 0
 var _last_rendered_second: int = -1
+var _local_end_ms: int = 0
+var _last_predicted_time_s: float = -1.0
 
 func _apply_timer_state(label: String, time_s: float) -> void:
 	var timer_text : Label = get_node("Label")
@@ -55,10 +57,14 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if !_node_sync_active:
 		return
-	if _last_server_time_s < 0.0:
+	if _local_end_ms <= 0:
 		return
-	var elapsed: float = float(Time.get_ticks_msec() - _last_server_received_ms) / 1000.0
-	var predicted: float = maxf(0.0, _last_server_time_s - elapsed)
+	var now_ms: int = Time.get_ticks_msec()
+	var predicted: float = maxf(0.0, float(_local_end_ms - now_ms) / 1000.0)
+	# Keep countdown monotonic to avoid network jitter causing visual second regressions.
+	if _last_predicted_time_s >= 0.0 and predicted > _last_predicted_time_s:
+		predicted = _last_predicted_time_s
+	_last_predicted_time_s = predicted
 	var predicted_second: int = int(ceili(predicted))
 	if predicted_second == _last_rendered_second:
 		return
@@ -78,17 +84,27 @@ func apply_timer_from_node(label: String, time_s: float, max_time: int = -1) -> 
 		max_value = max_time
 	var now_ms: int = Time.get_ticks_msec()
 	var clamped_time: float = maxf(0.0, time_s)
-	if _node_sync_active and _last_server_time_s >= 0.0:
-		var elapsed: float = float(now_ms - _last_server_received_ms) / 1000.0
-		var expected: float = maxf(0.0, _last_server_time_s - elapsed)
-		var drift: float = absf(expected - clamped_time)
-		if drift > 1.25:
+	var suggested_end_ms: int = now_ms + int(clamped_time * 1000.0)
+	if _node_sync_active and _local_end_ms > 0:
+		var local_remaining: float = maxf(0.0, float(_local_end_ms - now_ms) / 1000.0)
+		var drift: float = clamped_time - local_remaining
+		if drift < -0.15:
+			# Server says less time remains; pull local clock forward.
+			_local_end_ms = suggested_end_ms
 			_last_rendered_second = -1
+		elif drift > 2.5:
+			# Large discrepancy likely means stale local anchor; hard resync.
+			_local_end_ms = suggested_end_ms
+			_last_rendered_second = -1
+	else:
+		_local_end_ms = suggested_end_ms
+		_last_rendered_second = -1
 	_node_sync_active = true
 	_authoritative_label = label
 	_last_server_time_s = clamped_time
 	_last_server_received_ms = now_ms
-	_apply_timer_state(label, clamped_time)
+	_last_predicted_time_s = maxf(0.0, float(_local_end_ms - now_ms) / 1000.0)
+	_apply_timer_state(label, _last_predicted_time_s)
 
 @rpc("any_peer", "call_local", "reliable")
 func set_max_val_rpc(new : int) -> void:
@@ -107,3 +123,5 @@ func set_visible_rpc(mode : bool) -> void:
 		_last_server_time_s = -1.0
 		_last_server_received_ms = 0
 		_last_rendered_second = -1
+		_local_end_ms = 0
+		_last_predicted_time_s = -1.0

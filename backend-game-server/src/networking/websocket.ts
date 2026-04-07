@@ -16,6 +16,7 @@ type ClientSession = {
   ws: WebSocket;
   peerId: number | null;
   roomId: string | null;
+  joinedRoomAtMs: number | null;
   username: string;
   name: string;
   version: string;
@@ -31,6 +32,7 @@ type ActiveGamemodePayload = {
   mods: unknown[];
   startedAtMs: number;
   remainingSecs: number;
+  serverNowMs: number;
 };
 
 type SelectedGamemodePayload = {
@@ -46,6 +48,115 @@ const activeUserRoomLocks = new Map<
   number,
   { roomId: string; ws: WebSocket }
 >();
+const ROOM_TIMER_SYNC_INTERVAL_MS = 1_000;
+const MATCH_TRANSFER_RETRY_INTERVAL_MS = 10_000;
+let _matchTransferRetryLoopStarted = false;
+let _matchTransferRetryInProgress = false;
+let _roomTimerSyncLoopStarted = false;
+const roomTimerLabels = new Map<string, string>();
+
+function broadcastDbAuthoritativeTimerTicks(): void {
+  const nowMs = Date.now();
+  const activeRooms = roomRepo.getAllActiveRooms();
+  for (const dbRoom of activeRooms) {
+    const active = parseDbActiveGamemode(dbRoom, nowMs);
+    if (active === null) {
+      continue;
+    }
+    const room = roomManager.getRoom(dbRoom.id);
+    if (!room || room.clients.size === 0) {
+      continue;
+    }
+    const label = roomTimerLabels.get(dbRoom.id) ?? "Gamemode";
+    const remaining = calculateRemainingSecsAt(
+      active.startedAtMs,
+      active.params,
+      nowMs,
+    );
+    const maxTime = totalGamemodeSecondsFromParams(active.params);
+    const rpcData = {
+      fromPeer: room.hostPeerId,
+      method: "remote_gamemode_timer_sync",
+      args: [label, remaining, maxTime, nowMs, active.startedAtMs],
+    };
+    broadcast(room, "rpc_call", rpcData);
+  }
+}
+
+function findAccessTokenForRoom(roomId: string): string | null {
+  for (const session of clientSessions.values()) {
+    if (
+      session.roomId === roomId &&
+      session.isAuthenticated &&
+      typeof session.accessToken === "string" &&
+      session.accessToken.trim().length > 0
+    ) {
+      return session.accessToken;
+    }
+  }
+  return null;
+}
+
+async function retryPendingRoomMatchTransfers(): Promise<void> {
+  if (_matchTransferRetryInProgress) {
+    return;
+  }
+  _matchTransferRetryInProgress = true;
+  try {
+    const pendingMatches = roomRepo.getPendingRoomMatchHistory(25);
+    if (pendingMatches.length === 0) {
+      return;
+    }
+
+    for (const pending of pendingMatches) {
+      const accessToken = findAccessTokenForRoom(pending.room_id);
+      if (!accessToken) {
+        // Retry later when an authenticated room participant is connected.
+        continue;
+      }
+
+      const participants = roomRepo
+        .getRoomMatchParticipants(pending.id)
+        .map((entry) => {
+          return {
+            user_id: entry.user_id,
+            kills: Math.max(0, entry.kills),
+            deaths: Math.max(0, entry.deaths),
+            playtime_seconds: Math.max(0, entry.playtime_seconds),
+            won: entry.won > 0,
+          } satisfies MatchPlayerReport;
+        });
+
+      if (participants.length === 0) {
+        roomRepo.markRoomMatchHistoryTransferFailed(
+          pending.id,
+          "No match participants available for transfer",
+        );
+        continue;
+      }
+
+      try {
+        const result = await reportMatchToDjango(accessToken, {
+          room_id: pending.room_id,
+          gamemode: pending.gamemode,
+          winner_user_id: pending.winner_user_id,
+          duration_seconds: pending.duration_seconds,
+          players: participants,
+        });
+        roomRepo.markRoomMatchHistoryTransferred(
+          pending.id,
+          typeof result.match_id === "number" ? result.match_id : null,
+        );
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        roomRepo.markRoomMatchHistoryTransferFailed(pending.id, errorMessage);
+      }
+    }
+  } finally {
+    _matchTransferRetryInProgress = false;
+  }
+}
 
 async function syncRegistryRoomStateNow(): Promise<void> {
   const activeRooms = roomRepo.getAllActiveRooms();
@@ -139,8 +250,12 @@ function validateJson(raw: string): Message | null {
 
 function parseDbActiveGamemode(
   dbRoom: ReturnType<RoomRepository["getRoomById"]>,
+  atMs?: number,
 ): ActiveGamemodePayload | null {
   if (!dbRoom) {
+    return null;
+  }
+  if ((dbRoom.active_gamemode_running ?? 0) !== 1) {
     return null;
   }
   if (
@@ -169,16 +284,22 @@ function parseDbActiveGamemode(
     mods = [];
   }
 
+  const referenceMs =
+    typeof atMs === "number" && Number.isFinite(atMs) && atMs > 0
+      ? Math.floor(atMs)
+      : Date.now();
+
   return {
     index: dbRoom.active_gamemode_index,
     params,
     mods,
     startedAtMs: dbRoom.active_gamemode_started_at_ms,
-    remainingSecs:
-      typeof dbRoom.active_gamemode_remaining_secs === "number" &&
-      dbRoom.active_gamemode_remaining_secs >= 0
-        ? Math.max(1, Math.floor(dbRoom.active_gamemode_remaining_secs))
-        : calculateRemainingSecs(dbRoom.active_gamemode_started_at_ms, params),
+    remainingSecs: calculateRemainingSecsAt(
+      dbRoom.active_gamemode_started_at_ms,
+      params,
+      referenceMs,
+    ),
+    serverNowMs: referenceMs,
   };
 }
 
@@ -217,6 +338,14 @@ function calculateRemainingSecs(
   startedAtMs: number,
   params: unknown[],
 ): number {
+  return calculateRemainingSecsAt(startedAtMs, params);
+}
+
+function calculateRemainingSecsAt(
+  startedAtMs: number,
+  params: unknown[],
+  atMs?: number,
+): number {
   const firstParam =
     Array.isArray(params) && params.length > 0 ? params[0] : 10;
   const minutesRaw =
@@ -227,7 +356,10 @@ function calculateRemainingSecs(
     1,
     Math.floor((Number.isFinite(minutesRaw) ? minutesRaw : 10) * 60),
   );
-  const nowMs = Date.now();
+  const nowMs =
+    typeof atMs === "number" && Number.isFinite(atMs) && atMs > 0
+      ? Math.floor(atMs)
+      : Date.now();
   const elapsedSecs = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
   return Math.max(1, totalSecs - elapsedSecs);
 }
@@ -239,7 +371,17 @@ function totalGamemodeSecondsFromParams(params: unknown[]): number {
     typeof firstParam === "number"
       ? firstParam
       : Number.parseInt(String(firstParam ?? 10), 10);
-  return Math.max(1, Math.floor((Number.isFinite(minutesRaw) ? minutesRaw : 10) * 60));
+  return Math.max(
+    1,
+    Math.floor((Number.isFinite(minutesRaw) ? minutesRaw : 10) * 60),
+  );
+}
+
+function toSafeMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return Date.now();
+  }
+  return Math.floor(value);
 }
 
 function parseNumber(value: unknown, fallback: number): number {
@@ -433,12 +575,27 @@ function handleRoomDeparture(
 export function setupWebSocket(server: http.Server) {
   const wss = new WebSocketServer({ server });
 
+  if (!_matchTransferRetryLoopStarted) {
+    _matchTransferRetryLoopStarted = true;
+    setInterval(() => {
+      void retryPendingRoomMatchTransfers();
+    }, MATCH_TRANSFER_RETRY_INTERVAL_MS);
+  }
+
+  if (!_roomTimerSyncLoopStarted) {
+    _roomTimerSyncLoopStarted = true;
+    setInterval(() => {
+      broadcastDbAuthoritativeTimerTicks();
+    }, ROOM_TIMER_SYNC_INTERVAL_MS);
+  }
+
   wss.on("connection", (ws: WebSocket) => {
     const ip = getClientIp(ws);
     const session: ClientSession = {
       ws,
       peerId: null,
       roomId: null,
+      joinedRoomAtMs: null,
       username: "",
       name: "",
       version: "",
@@ -848,6 +1005,7 @@ export function setupWebSocket(server: http.Server) {
           session.username = identity.username;
           session.version = version;
           session.roomId = roomId;
+          session.joinedRoomAtMs = Date.now();
           activeUserRoomLocks.set(identity.userId, { roomId, ws });
 
           console.log(
@@ -873,25 +1031,28 @@ export function setupWebSocket(server: http.Server) {
 
           // Player count already updated by addPlayerSession, no need to update again
 
+          const roomJoinAtMs = session.joinedRoomAtMs ?? Date.now();
           const members = roomManager.getRoomMembers(roomId);
           const chatHistory = roomRepo.getRecentRoomChatMessages(roomId, 100);
           const dbActiveGamemode: ActiveGamemodePayload | null =
-            parseDbActiveGamemode(dbRoom);
+            parseDbActiveGamemode(dbRoom, roomJoinAtMs);
           const activeGamemodePayload: ActiveGamemodePayload | null =
             dbActiveGamemode !== null
               ? dbActiveGamemode
               : updatedRoom.activeGamemode === null
                 ? null
-              : {
-                  index: updatedRoom.activeGamemode.index,
-                  params: updatedRoom.activeGamemode.params,
-                  mods: updatedRoom.activeGamemode.mods,
-                  startedAtMs: updatedRoom.activeGamemode.startedAtMs,
-                  remainingSecs: calculateRemainingSecs(
-                    updatedRoom.activeGamemode.startedAtMs,
-                    updatedRoom.activeGamemode.params,
-                  ),
-                };
+                : {
+                    index: updatedRoom.activeGamemode.index,
+                    params: updatedRoom.activeGamemode.params,
+                    mods: updatedRoom.activeGamemode.mods,
+                    startedAtMs: updatedRoom.activeGamemode.startedAtMs,
+                    remainingSecs: calculateRemainingSecsAt(
+                      updatedRoom.activeGamemode.startedAtMs,
+                      updatedRoom.activeGamemode.params,
+                      roomJoinAtMs,
+                    ),
+                    serverNowMs: roomJoinAtMs,
+                  };
           const selectedGamemodePayload: SelectedGamemodePayload | null =
             parseDbSelectedGamemode(dbRoom);
           console.log(
@@ -1218,6 +1379,17 @@ export function setupWebSocket(server: http.Server) {
             });
           }
 
+          const localMatchHistoryId = roomRepo.addRoomMatchHistory({
+            roomId: session.roomId,
+            gamemode,
+            winnerUserId:
+              winnerUserId && Number.isInteger(winnerUserId) && winnerUserId > 0
+                ? winnerUserId
+                : null,
+            durationSeconds,
+          });
+          roomRepo.addRoomMatchParticipants(localMatchHistoryId, players);
+
           reportMatchToDjango(session.accessToken, {
             room_id: session.roomId,
             gamemode,
@@ -1229,6 +1401,10 @@ export function setupWebSocket(server: http.Server) {
             players,
           })
             .then((result) => {
+              roomRepo.markRoomMatchHistoryTransferred(
+                localMatchHistoryId,
+                typeof result.match_id === "number" ? result.match_id : null,
+              );
               send(ws, "match_result_saved", {
                 roomId: session.roomId,
                 matchId: result.match_id ?? null,
@@ -1241,6 +1417,10 @@ export function setupWebSocket(server: http.Server) {
             .catch((err: unknown) => {
               const errorMessage =
                 err instanceof Error ? err.message : String(err);
+              roomRepo.markRoomMatchHistoryTransferFailed(
+                localMatchHistoryId,
+                errorMessage,
+              );
               logWarning(
                 `match_result persistence failed for roomId=${session.roomId}: ${errorMessage}`,
               );
@@ -1263,13 +1443,10 @@ export function setupWebSocket(server: http.Server) {
 
           const targetPeer = (msg.data as any)?.targetPeer || 0;
           const method = (msg.data as any)?.method || "";
-          const args = (msg.data as any)?.args || [];
-
-          const rpcData = {
-            fromPeer: session.peerId,
-            method,
-            args,
-          };
+          const argsRaw = (msg.data as any)?.args;
+          const args: unknown[] = Array.isArray(argsRaw) ? argsRaw : [];
+          let forwardedArgs: unknown[] = args;
+          let shouldRelay = true;
 
           const sender = room.clients.get(session.peerId);
           const senderIsHost = Boolean(sender?.isHost);
@@ -1278,6 +1455,7 @@ export function setupWebSocket(server: http.Server) {
             const paramsRaw = Array.isArray(args) ? args[1] : [];
             const modsRaw = Array.isArray(args) ? args[2] : [];
             const startedRaw = Array.isArray(args) ? args[3] : 0;
+            const labelRaw = Array.isArray(args) ? args[4] : undefined;
             const idx =
               typeof idxRaw === "number"
                 ? Math.max(0, Math.floor(idxRaw))
@@ -1302,38 +1480,91 @@ export function setupWebSocket(server: http.Server) {
               totalGamemodeSecondsFromParams(
                 Array.isArray(paramsRaw) ? paramsRaw : [],
               ),
+              true,
             );
+            const serverNowMs = Date.now();
+            const normalizedParams = Array.isArray(paramsRaw) ? paramsRaw : [];
+            const normalizedMods = Array.isArray(modsRaw) ? modsRaw : [];
+            const totalSecs = totalGamemodeSecondsFromParams(normalizedParams);
+            const remainingSecs = calculateRemainingSecsAt(
+              startedAtMs,
+              normalizedParams,
+              serverNowMs,
+            );
+            forwardedArgs = [
+              idx,
+              normalizedParams,
+              normalizedMods,
+              startedAtMs,
+              remainingSecs,
+              serverNowMs,
+              totalSecs,
+            ];
+            if (typeof labelRaw === "string" && labelRaw.trim().length > 0) {
+              roomTimerLabels.set(room.id, labelRaw);
+            }
           } else if (method === "remote_end_gamemode" && senderIsHost) {
+            const active = room.activeGamemode;
+            if (active !== null) {
+              const startedAtMs = toSafeMs(active.startedAtMs);
+              const endedAtMs = Date.now();
+              const durationSeconds = Math.max(
+                0,
+                Math.floor((endedAtMs - startedAtMs) / 1000),
+              );
+              roomRepo.addRoomGamemodeHistory({
+                roomId: room.id,
+                gamemodeIndex: active.index,
+                params: Array.isArray(active.params) ? active.params : [],
+                mods: Array.isArray(active.mods) ? active.mods : [],
+                timerSeconds: totalGamemodeSecondsFromParams(
+                  Array.isArray(active.params) ? active.params : [],
+                ),
+                startedAtMs,
+                endedAtMs,
+                durationSeconds,
+              });
+            }
             roomManager.clearActiveGamemode(room.id);
             roomRepo.clearActiveGamemodeState(room.id);
+            roomTimerLabels.delete(room.id);
           } else if (method === "remote_gamemode_timer_sync" && senderIsHost) {
-            const remainingRaw = Array.isArray(args) ? args[1] : undefined;
-            const totalRaw = Array.isArray(args) ? args[2] : undefined;
-            const startedAtMs = recalculateStartedAtFromTimer(
-              Date.now(),
-              remainingRaw,
-              totalRaw,
-            );
-            if (startedAtMs !== null) {
-              const active = room.activeGamemode;
-              if (active !== null) {
-                roomManager.setActiveGamemode(
-                  room.id,
-                  active.index,
-                  Array.isArray(active.params) ? active.params : [],
-                  Array.isArray(active.mods) ? active.mods : [],
-                  startedAtMs,
-                );
-                roomRepo.setActiveGamemodeState(
-                  room.id,
-                  active.index,
-                  Array.isArray(active.params) ? active.params : [],
-                  Array.isArray(active.mods) ? active.mods : [],
-                  startedAtMs,
-                  Math.max(1, Math.ceil(parseNumber(remainingRaw, 0))),
-                );
-              }
+            const label = String(args[0] ?? "Gamemode");
+            if (label.trim().length > 0) {
+              roomTimerLabels.set(room.id, label);
             }
+            let authoritativeRemaining: number | null = null;
+            let authoritativeMax: number | null = null;
+
+            const dbRoom = roomRepo.getRoomById(room.id);
+            const dbActive = parseDbActiveGamemode(dbRoom);
+            if (dbActive !== null) {
+              authoritativeRemaining = calculateRemainingSecs(
+                dbActive.startedAtMs,
+                dbActive.params,
+              );
+              authoritativeMax = totalGamemodeSecondsFromParams(
+                dbActive.params,
+              );
+            } else if (room.activeGamemode !== null) {
+              authoritativeRemaining = calculateRemainingSecs(
+                room.activeGamemode.startedAtMs,
+                Array.isArray(room.activeGamemode.params)
+                  ? room.activeGamemode.params
+                  : [],
+              );
+              authoritativeMax = totalGamemodeSecondsFromParams(
+                Array.isArray(room.activeGamemode.params)
+                  ? room.activeGamemode.params
+                  : [],
+              );
+            }
+
+            if (authoritativeRemaining !== null && authoritativeMax !== null) {
+              forwardedArgs = [label, authoritativeRemaining, authoritativeMax];
+            }
+            // DB timer loop is the single source of countdown broadcasts.
+            shouldRelay = false;
           } else if (method === "remote_gamemode_menu_sync" && senderIsHost) {
             const idxRaw = Array.isArray(args) ? args[0] : undefined;
             const paramsRaw = Array.isArray(args) ? args[1] : [];
@@ -1359,7 +1590,16 @@ export function setupWebSocket(server: http.Server) {
             );
           }
 
+          if (!shouldRelay) {
+            break;
+          }
+
           if (targetPeer === 0) {
+            const rpcData = {
+              fromPeer: session.peerId,
+              method,
+              args: forwardedArgs,
+            };
             // Broadcast to all peers in room
             const recipientCount = room.clients.size - 1; // exclude sender
             if (
@@ -1372,6 +1612,11 @@ export function setupWebSocket(server: http.Server) {
             }
             broadcast(room, "rpc_call", rpcData, session.peerId);
           } else {
+            const rpcData = {
+              fromPeer: session.peerId,
+              method,
+              args: forwardedArgs,
+            };
             // Send to specific peer
             const targetSession = Array.from(clientSessions.values()).find(
               (s) => s.roomId === room.id && s.peerId === targetPeer,
