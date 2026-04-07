@@ -8,6 +8,37 @@ signal room_create_failed(message: String)
 @export var base_api_url: String = ""
 var _http_rooms: HTTPRequest
 var _http_create: HTTPRequest
+var _selected_server: Dictionary = {}
+
+func _normalize_server_api_url(raw_url: String) -> String:
+	var value := raw_url.strip_edges()
+	while value.ends_with("/"):
+		value = value.left(value.length() - 1)
+	if value == "":
+		return ""
+	if value.ends_with("/api"):
+		return value
+
+	var scheme_pos := value.find("://")
+	if scheme_pos == -1:
+		return value
+	var host_start := scheme_pos + 3
+	var path_start := value.find("/", host_start)
+	if path_start == -1:
+		return value + "/api"
+
+	var path := value.substr(path_start, value.length() - path_start)
+	if path == "":
+		return value + "/api"
+	if path.begins_with("/api"):
+		return value
+	return value
+
+func set_selected_server(server_data: Dictionary) -> void:
+	_selected_server = server_data.duplicate(true)
+	var selected_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
+	if selected_api != "":
+		base_api_url = selected_api
 
 func _ready() -> void:
 	if base_api_url.strip_edges() == "":
@@ -43,12 +74,18 @@ func create_room(config: Dictionary) -> void:
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[GlobalPMBackend] ❌ Not authenticated; cannot create room")
 		return
-	var selected_server_id := BackendConfig.get_selected_server_id().strip_edges()
+	var selected_server_id := str(_selected_server.get("id", "")).strip_edges()
+	if selected_server_id == "":
+		selected_server_id = BackendConfig.get_selected_server_id().strip_edges()
 	if selected_server_id == "":
 		print("[GlobalPMBackend] ❌ No selected server_id; cannot create room")
 		room_create_failed.emit("Select a specific server before creating a room")
 		return
-	base_api_url = BackendConfig.get_node_api_base_url()
+	var selected_api := _normalize_server_api_url(str(_selected_server.get("api_url", "")))
+	if selected_api != "":
+		base_api_url = selected_api
+	else:
+		base_api_url = BackendConfig.get_node_api_base_url()
 	var url := base_api_url + "/rooms"
 	var headers: PackedStringArray = [
 		"Authorization: Bearer " + Global.auth_token,

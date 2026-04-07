@@ -555,6 +555,8 @@ func _create_game_server_entry(server_data: Dictionary) -> void:
 
 func _on_game_server_selected(server_data: Dictionary) -> void:
 	BackendConfig.set_selected_game_server(server_data)
+	if room_creation_dialog and room_creation_dialog.backend:
+		room_creation_dialog.backend.set_selected_server(server_data)
 	var selected_name := str(server_data.get("name", "Server List"))
 	global_server_list_button.text = selected_name
 
@@ -642,6 +644,8 @@ func _on_global_room_selected(room_id: String, room_data: Dictionary) -> void:
 	if room_data.has("server") and room_data.get("server") is Dictionary:
 		var server_data: Dictionary = room_data.get("server") as Dictionary
 		BackendConfig.set_selected_game_server(server_data)
+		if room_creation_dialog and room_creation_dialog.backend:
+			room_creation_dialog.backend.set_selected_server(server_data)
 		print("[Menu] 🌐 Selected server stored: ", server_data.get("id", ""))
 	if not Global.is_authenticated or Global.auth_token == "":
 		print("[Menu] ❌ Not authenticated; cannot join room")
