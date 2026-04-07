@@ -128,7 +128,8 @@ func set_parameters(p : RigidPlayer) -> void:
 		if mods.size() > 1:
 			# set player health locally
 			p.set_max_health(mods[1] as int)
-			p.set_health(p.max_health as int)
+			# Use sync-health path so late/rejoin clients fill correctly even during spawn protection.
+			p._receive_server_health(p.max_health as int)
 		if mods.size() > 2:
 			# jump force is a multiplier
 			p.set_jump_force(2.4 * mods[2] as float)
