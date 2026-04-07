@@ -25,19 +25,39 @@ func _get_node_adapter() -> MultiplayerNodeAdapter:
 
 func _refresh_pause_permissions() -> void:
 	var change_map_button: Button = $PauseMenu/ScrollContainer/Pause/ChangeMap
+	var save_world_button: Button = $PauseMenu/ScrollContainer/Pause/SaveWorld
 	var map_selector: Node = $PauseMenu/ScrollContainer/Pause/MapList
 	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
 	if adapter == null:
 		change_map_button.visible = true
 		change_map_button.disabled = false
+		save_world_button.visible = true
+		save_world_button.disabled = false
 		if map_selector != null and map_selector.get("disabled") != null:
 			map_selector.set("disabled", false)
+		if map_selector != null and map_selector.has_method("_apply_world_browser_visibility"):
+			map_selector.call("_apply_world_browser_visibility")
 		return
 	var is_host: bool = adapter.is_server()
 	change_map_button.visible = is_host
 	change_map_button.disabled = !is_host
+	save_world_button.visible = is_host
+	save_world_button.disabled = !is_host
 	if map_selector != null and map_selector.get("disabled") != null:
 		map_selector.set("disabled", !is_host)
+	if map_selector != null and map_selector.has_method("_apply_world_browser_visibility"):
+		map_selector.call("_apply_world_browser_visibility")
+
+func _refresh_gamemode_menu_host_state() -> void:
+	var menu: Node = $PauseMenu/ScrollContainer/Pause/GamemodeMenu
+	if menu == null:
+		return
+	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
+	var is_me_host: bool = adapter != null and adapter.is_server()
+	if menu.has_method("_on_node_host_changed"):
+		menu.call("_on_node_host_changed", -1, is_me_host)
+	elif menu.has_method("_apply_host_ui_permissions"):
+		menu.call("_apply_host_ui_permissions")
 
 func _ready() -> void:
 	$PauseMenu/ScrollContainer/Pause/ChangeMap.connect("pressed", _send_on_change_map_pressed)
@@ -49,6 +69,7 @@ func _ready() -> void:
 
 func _on_node_host_changed(_new_host_peer_id: int, _is_me_host: bool) -> void:
 	_refresh_pause_permissions()
+	_refresh_gamemode_menu_host_state()
 
 func hide_pause_menu() -> void:
 	Global.is_paused = false
@@ -76,6 +97,7 @@ func show_pause_menu() -> void:
 		if Global.get_player() != null:
 			Global.get_player().locked = true
 		_refresh_pause_permissions()
+		_refresh_gamemode_menu_host_state()
 		# show tip on pause screen
 		var tipnum : int = randi() % NUM_OF_TIPS
 		pause_tip_text.text = JsonHandler.find_entry_in_file(str("tip/", tipnum))

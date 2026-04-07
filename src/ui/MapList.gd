@@ -41,13 +41,9 @@ func _get_node_adapter() -> MultiplayerNodeAdapter:
 	return Global.get_node_adapter()
 
 func _apply_world_browser_visibility() -> void:
-	var adapter: MultiplayerNodeAdapter = _get_node_adapter()
-	if adapter == null:
-		tabs.set_tab_hidden(2, false)
-		return
-	var is_host: bool = adapter.is_server()
-	tabs.set_tab_hidden(2, !is_host)
-	if not is_host and tabs.current_tab == 2:
+	# World repository browser is disabled in this menu for all users.
+	tabs.set_tab_hidden(2, true)
+	if tabs.current_tab == 2:
 		tabs.current_tab = 0
 
 func add_map(file_name : String, list : Control, can_delete : bool = false, lines : Array = [], id : int = -1) -> void:
@@ -187,7 +183,6 @@ func _on_visibility_changed() -> void:
 	_apply_world_browser_visibility()
 
 	if first_open:
-		refresh_user_uploaded()
 		first_open = false
 
 	# When pause menu becomes visible, reload and highlight the active room map
@@ -218,11 +213,10 @@ func _on_node_host_changed(_new_host_peer_id: int, _is_me_host: bool) -> void:
 
 func _on_tab_changed(idx : int) -> void:
 	if idx == 2:
-		refresh_user_uploaded()
-	else:
-		for c : Node in get_children():
-			if c is HTTPRequest:
-				c.queue_free()
+		tabs.current_tab = 0
+	for c : Node in get_children():
+		if c is HTTPRequest:
+			c.queue_free()
 
 func _on_map_selected(file_name : String, lines : Array, image : Image, id : int = -1) -> void:
 	selected_name = file_name

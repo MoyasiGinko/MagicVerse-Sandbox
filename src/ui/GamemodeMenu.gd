@@ -26,6 +26,8 @@ var gamemode_names_list : Array = []
 var selected_mode_params : Array = []
 var selected_mode_mods : Array = []
 var _suppress_broadcast: bool = false
+var _last_host_authority_state: int = -1
+var _host_ui_poll_accum: float = 0.0
 
 func _get_node_adapter() -> MultiplayerNodeAdapter:
 	var root: Node = get_tree().root
@@ -151,6 +153,17 @@ func _ready() -> void:
 	if adapter != null and not adapter.host_changed.is_connected(_on_node_host_changed):
 		adapter.host_changed.connect(_on_node_host_changed)
 	_apply_host_ui_permissions()
+	_last_host_authority_state = 1 if _is_host_authority() else 0
+
+func _process(delta: float) -> void:
+	_host_ui_poll_accum += delta
+	if _host_ui_poll_accum < 0.2:
+		return
+	_host_ui_poll_accum = 0.0
+	var current_state: int = 1 if _is_host_authority() else 0
+	if current_state != _last_host_authority_state:
+		_last_host_authority_state = current_state
+		_apply_host_ui_permissions()
 
 func _on_node_host_changed(_new_host_peer_id: int, _is_me_host: bool) -> void:
 	_apply_host_ui_permissions()
