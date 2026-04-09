@@ -290,13 +290,25 @@ func update_timer() -> void:
 func _build_node_match_report_payload(args: Array) -> Dictionary:
 	var elapsed_seconds: int = time_limit_seconds
 	if game_timer != null and is_instance_valid(game_timer):
-		elapsed_seconds = maxi(0, time_limit_seconds - int(floor(game_timer.time_left)))
+		elapsed_seconds = maxi(0, time_limit_seconds - floori(game_timer.time_left))
 
 	var winner_kind: String = ""
 	var winner_value: Variant = null
+	var winner_peer_id: int = -1
 	if args.size() > 1:
 		winner_kind = str(args[1])
 		winner_value = args[0]
+		if winner_kind == "player":
+			if winner_value is int:
+				winner_peer_id = winner_value as int
+			elif winner_value is float:
+				winner_peer_id = floori(winner_value as float)
+			elif winner_value is String:
+				var winner_text := (winner_value as String).strip_edges()
+				if winner_text.is_valid_int():
+					winner_peer_id = winner_text.to_int()
+				elif winner_text.is_valid_float():
+					winner_peer_id = floori(winner_text.to_float())
 
 	var leaderboard: Array = []
 	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
@@ -306,15 +318,23 @@ func _build_node_match_report_payload(args: Array) -> Dictionary:
 		if not (player_value is RigidPlayer):
 			continue
 		var player: RigidPlayer = player_value as RigidPlayer
+		var player_name: String = player.display_name.strip_edges()
+		if player_name == "":
+			player_name = player.assigned_player_name.strip_edges()
+		if player_name == "":
+			player_name = "Player %d" % int(player.get_multiplayer_authority())
 		var won: bool = false
 		if winner_kind == "player":
-			won = int(player.get_multiplayer_authority()) == int(winner_value as float)
+			won = player.get_multiplayer_authority() == winner_peer_id
 		elif winner_kind == "team":
 			won = player.team == str(winner_value)
 		leaderboard.append({
 			"peer_id": int(player.get_multiplayer_authority()),
+			"display_name": player_name,
+			"team": str(player.team),
 			"kills": int(player.kills),
 			"deaths": int(player.deaths),
+			"score": int(player.kills),
 			"capture_time": int(player.capture_time),
 			"checkpoint": int(player.checkpoint),
 			"playtime_seconds": elapsed_seconds,
@@ -327,8 +347,8 @@ func _build_node_match_report_payload(args: Array) -> Dictionary:
 		"winner_type": winner_kind,
 		"leaderboard": leaderboard,
 	}
-	if winner_kind == "player" and winner_value != null:
-		payload["winner_peer_id"] = int(winner_value as float)
+	if winner_kind == "player" and winner_peer_id > 0:
+		payload["winner_peer_id"] = winner_peer_id
 	elif winner_kind == "team" and winner_value != null:
 		payload["winner_team"] = str(winner_value)
 	return payload
@@ -336,7 +356,16 @@ func _build_node_match_report_payload(args: Array) -> Dictionary:
 func end(params : Array) -> void:
 	# only server ends games
 	if !multiplayer.is_server() and !_force_local_sync: return
+	if !running:
+		return
+	running = false
 	_disconnect_player_join_sync()
+	var node_end_payload: Dictionary = {}
+	if not _force_local_sync:
+		var adapter_pre: MultiplayerNodeAdapter = Global.get_node_adapter()
+		if adapter_pre != null and adapter_pre.is_server():
+			node_end_payload = _build_node_match_report_payload(params)
+			print("[Gamemode] 📊 Prepared end payload players=", (node_end_payload.get("leaderboard", []) as Array).size())
 	print(get_multiplayer_authority(), " - Ended gamemode: ", gamemode_name)
 	# cleanup and run any final stuff
 	var players_snapshot: Array = Global.get_world().rigidplayer_list.duplicate()
@@ -369,7 +398,6 @@ func end(params : Array) -> void:
 			Global.get_world().get_current_map().set_gravity.rpc(false)
 	# never free gamemodes because they are saved as part of the world
 	emit_signal("gamemode_ended")
-	running = false
 	if timer_ui != null:
 		if _force_local_sync:
 			timer_ui.set_visible_rpc(false)
@@ -381,8 +409,8 @@ func end(params : Array) -> void:
 	game_timer.stop()
 	if not _force_local_sync:
 		var adapter: MultiplayerNodeAdapter = Global.get_node_adapter()
-		if adapter != null and adapter.is_server():
-			adapter.send_rpc_call("remote_end_gamemode", [_build_node_match_report_payload(params)])
+		if adapter != null and adapter.is_server() and adapter.is_backend_connected() and adapter.get_room_id() != "" and adapter.get_peer_id() > 0:
+			adapter.send_rpc_call("remote_end_gamemode", [node_end_payload])
 	# show vote screen
 	# only runs as server
 	vote_panel.start_voting()

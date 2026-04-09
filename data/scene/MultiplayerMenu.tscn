@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://c5aeyr5rirpm4"]
+[gd_scene load_steps=22 format=3 uid="uid://c5aeyr5rirpm4"]
 
 [ext_resource type="Script" uid="uid://fksufrsb1xj3" path="res://src/MultiplayerMenu.gd" id="1_fgila"]
 [ext_resource type="Script" uid="uid://dwy5qfsib3g3m" path="res://src/ui/DynamicButton.gd" id="2_o48rt"]
@@ -14,6 +14,7 @@
 [ext_resource type="Script" uid="uid://ckfgx3scv7ty3" path="res://src/ui/ServerList.gd" id="8_7bulb"]
 [ext_resource type="FontVariation" uid="uid://ckx3gh6vh6t5e" path="res://data/theme_elements/bold_font_variation.tres" id="8_labno"]
 [ext_resource type="PackedScene" uid="uid://d4f0w4x3panmu" path="res://data/scene/ui/MapList.tscn" id="14_l2isx"]
+[ext_resource type="PackedScene" uid="uid://dk7nqof7jf2lw" path="res://data/scene/ui/StatsMenu.tscn" id="15_stats"]
 
 [sub_resource type="Gradient" id="Gradient_t4xug"]
 offsets = PackedFloat32Array(0, 0.281065)
@@ -210,9 +211,20 @@ text = "Editor"
 script = ExtResource("2_o48rt")
 json_text = "ui/world_editor"
 
+[node name="Stats" type="Button" parent="MainMenu"]
+self_modulate = Color(0.956863, 1.72157, 1.32157, 1)
+custom_minimum_size = Vector2(2.08165e-12, 88)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 28
+text = "Stats"
+script = ExtResource("2_o48rt")
+
 [node name="Spacer2" type="Control" parent="MainMenu"]
 custom_minimum_size = Vector2(2.08165e-12, 16)
 layout_mode = 2
+
+[node name="StatsMenu" parent="." instance=ExtResource("15_stats")]
 
 [node name="Settings" type="Button" parent="MainMenu"]
 custom_minimum_size = Vector2(2.08165e-12, 60)

@@ -192,8 +192,6 @@ func _on_end_gamemode_pressed() -> void:
 		if !multiplayer.is_server(): return
 	var e : Event = Event.new(Event.EventType.END_ACTIVE_GAMEMODE, [])
 	e.start()
-	if adapter != null:
-		adapter.send_rpc_call("remote_end_gamemode", [])
 
 func _on_tbw_loaded() -> void:
 	# delete old list

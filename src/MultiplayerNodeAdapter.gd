@@ -330,7 +330,10 @@ func _handle_error(data: Dictionary) -> void:
 
 	push_error("Backend error: " + message)
 	UIHandler.show_alert(message, 8, false, UIHandler.alert_colour_error)
-	connection_failed.emit(message)
+	# Only emit connection_failed during pre-room flows.
+	# In-match/server-side processing errors should not be treated as socket disconnects.
+	if _room_id == "" or _peer_id <= 0:
+		connection_failed.emit(message)
 
 func _handle_rooms_changed() -> void:
 	"""Handle room list change notification from backend"""

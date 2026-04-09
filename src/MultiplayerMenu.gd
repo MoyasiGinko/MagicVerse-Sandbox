@@ -24,6 +24,7 @@ class_name MultiplayerMenu
 @onready var hair_colour_picker : Control = $AppearanceMenu/HairPanel/HairPanelContainer/ColorPickerButton
 @onready var global_server_list_panel: PanelContainer = $GlobalPlayMenu/ServerList
 @onready var global_server_list_button: Button = $GlobalPlayMenu/HostHbox/ServerListButton
+@onready var stats_menu: StatsMenu = $StatsMenu
 var global_server_list: GlobalServerList
 var room_creation_dialog: RoomCreationDialog
 var auth_manager: AuthenticationManager
@@ -183,6 +184,7 @@ func _ready() -> void:
 
 	Global.connect("appearance_changed", Callable(preview_player, "change_appearance"))
 	$MainMenu/Appearance.connect("pressed", Callable(self, "show_appearance_settings"))
+	$MainMenu/Stats.connect("pressed", Callable(self, "_on_stats_pressed"))
 	# play hair swing animation on new hair selected
 	#$AppearanceMenu/HairPanel/HairPanelContainer/Picker.connect("item_selected", play_preview_character_appearance_animation)
 	$AppearanceMenu/Back.connect("pressed", Callable(self, "hide_appearance_settings"))
@@ -267,6 +269,9 @@ func _ready() -> void:
 		room_creation_dialog.room_created.connect(_on_room_created)
 		print("[Menu] RoomCreationDialog connected")
 
+	if stats_menu and stats_menu.has_signal("closed"):
+		stats_menu.closed.connect(_on_stats_closed)
+
 	print("[Menu] MultiplayerMenu initialization complete!")
 	# Default to MainMenu on startup; hide appearance until requested
 	$MainMenu.visible = true
@@ -290,6 +295,14 @@ func hide_appearance_settings() -> void:
 		map.get_node("AnimationPlayer").play("appearance_out")
 	# Save appearance on back
 	Global.save_appearance()
+
+func _on_stats_pressed() -> void:
+	show_hide("StatsMenu", "MainMenu")
+	if stats_menu:
+		stats_menu.open_menu()
+
+func _on_stats_closed() -> void:
+	show_hide("MainMenu", "StatsMenu")
 
 func _on_quit_pressed() -> void:
 	"""Show quit dialog"""

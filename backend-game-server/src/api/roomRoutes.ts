@@ -250,6 +250,136 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+// Read recent match history (fallback for clients when Django history endpoint is unavailable)
+router.get("/matches/history", async (req: Request, res: Response) => {
+  try {
+    const limitRaw = req.query.limit;
+    const limit =
+      typeof limitRaw === "string"
+        ? Math.max(1, Math.min(Number.parseInt(limitRaw, 10) || 50, 200))
+        : 50;
+
+    const matches = roomRepo.getRecentRoomMatchHistory(limit).map((match) => {
+      const participants = roomRepo
+        .getRoomMatchParticipants(match.id)
+        .map((p) => {
+          const username = String(p.username ?? "").trim();
+          const displayName = String(p.display_name ?? "").trim();
+          const name =
+            displayName.length > 0
+              ? displayName
+              : username.length > 0
+                ? username
+                : `User ${p.user_id}`;
+          return {
+            user_id: p.user_id,
+            username: username.length > 0 ? username : name,
+            display_name: name,
+            team: String(p.team ?? "Default"),
+            kills: p.kills,
+            deaths: p.deaths,
+            score: p.score,
+            playtime_seconds: p.playtime_seconds,
+            won: p.won > 0,
+          };
+        });
+
+      const mvp = participants.reduce<null | (typeof participants)[number]>(
+        (best, current) => {
+          if (!best) {
+            return current;
+          }
+          if (current.score !== best.score) {
+            return current.score > best.score ? current : best;
+          }
+          if (current.kills !== best.kills) {
+            return current.kills > best.kills ? current : best;
+          }
+          if (current.deaths !== best.deaths) {
+            return current.deaths < best.deaths ? current : best;
+          }
+          return best;
+        },
+        null,
+      );
+
+      const teams: Record<string, typeof participants> = {};
+      for (const participant of participants) {
+        const teamName =
+          participant.team.trim().length > 0 ? participant.team : "Default";
+        if (!teams[teamName]) {
+          teams[teamName] = [];
+        }
+        teams[teamName].push(participant);
+      }
+
+      const winnerType = String(match.winner_type ?? "").trim();
+      const isDraw =
+        winnerType === "draw" ||
+        (winnerType.length === 0 &&
+          match.winner_user_id === null &&
+          !participants.some((p) => p.won));
+      let winnerName = "Draw";
+      if (!isDraw) {
+        if (winnerType === "team") {
+          winnerName = String(match.winner_team ?? "Unknown Team");
+        } else if (match.winner_user_id !== null) {
+          const winner = participants.find(
+            (p) => p.user_id === match.winner_user_id,
+          );
+          winnerName =
+            winner?.display_name ??
+            winner?.username ??
+            `User ${match.winner_user_id}`;
+        } else {
+          winnerName = "Unknown";
+        }
+      }
+
+      return {
+        id: match.id,
+        room_id: match.room_id,
+        gamemode: match.gamemode,
+        winner_user_id: match.winner_user_id,
+        winner_type:
+          winnerType.length > 0 ? winnerType : isDraw ? "draw" : "player",
+        winner_team: match.winner_team,
+        winner_name: winnerName,
+        is_draw: isDraw,
+        game_started_at_ms: match.game_started_at_ms,
+        game_ended_at_ms: match.game_ended_at_ms,
+        duration_seconds: match.duration_seconds,
+        created_at: match.created_at,
+        transferred_to_django: match.transferred_to_django,
+        django_match_id: match.django_match_id,
+        mvp:
+          mvp === null
+            ? null
+            : {
+                user_id: mvp.user_id,
+                username: mvp.username,
+                display_name: mvp.display_name,
+                team: mvp.team,
+                score: mvp.score,
+                kills: mvp.kills,
+                deaths: mvp.deaths,
+              },
+        teams,
+        players: participants,
+      };
+    });
+
+    res.json({
+      count: matches.length,
+      matches,
+      source: "node-room-history",
+    });
+  } catch (error) {
+    console.error("[RoomAPI] ❌ ERROR fetching match history:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Get specific room details
 router.get("/:id", async (req: Request, res: Response) => {
   try {
