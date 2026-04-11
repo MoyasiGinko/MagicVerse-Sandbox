@@ -97,6 +97,8 @@ func _on_ws_message() -> void:
 			_handle_room_joined(msg_data)
 		"rooms_changed":
 			_handle_rooms_changed()
+		"kicked":
+			_handle_kicked(msg_data)
 		"peer_joined":
 			_handle_peer_joined(msg_data)
 		"peer_left":
@@ -330,10 +332,31 @@ func _handle_error(data: Dictionary) -> void:
 
 	push_error("Backend error: " + message)
 	UIHandler.show_alert(message, 8, false, UIHandler.alert_colour_error)
+	if (_room_id != "" and _peer_id > 0) and (reason == "room_inactive" or reason == "room_not_found"):
+		_handle_left_room({})
+		connection_failed.emit(message)
+		return
 	# Only emit connection_failed during pre-room flows.
 	# In-match/server-side processing errors should not be treated as socket disconnects.
 	if _room_id == "" or _peer_id <= 0:
 		connection_failed.emit(message)
+
+func _handle_kicked(data: Dictionary) -> void:
+	var reason: String = str(data.get("reason", "kicked"))
+	var message: String = str(data.get("message", ""))
+	if message == "":
+		match reason:
+			"room_inactive":
+				message = "Room became inactive. Leaving server."
+			"room_removed":
+				message = "Room was removed. Leaving server."
+			"host_kick":
+				message = "You were removed by the host."
+			_:
+				message = "You were disconnected from the room."
+	UIHandler.show_alert(message, 8, false, UIHandler.alert_colour_error)
+	_handle_left_room({})
+	connection_failed.emit(message)
 
 func _handle_rooms_changed() -> void:
 	"""Handle room list change notification from backend"""

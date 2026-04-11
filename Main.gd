@@ -871,6 +871,12 @@ func _on_connection_failed(reason: String) -> void:
 	if _ws_join_waiting:
 		_ws_join_failed = true
 		_ws_join_fail_reason = reason
+	var was_in_room: bool = false
+	if node_peer != null:
+		was_in_room = node_peer.get_room_id() != "" and node_peer.get_unique_peer_id() > 0
+	if Global.connected_to_server or was_in_room:
+		kick_client(reason)
+		return
 	push_error("Node backend connection failed: " + reason)
 	UIHandler.show_alert("Connection failed: " + reason, 8, false, UIHandler.alert_colour_error)
 	host_button.disabled = false
