@@ -96,6 +96,8 @@ var _ws_join_failed: bool = false
 var _ws_join_fail_reason: String = ""
 var _pending_gamemode_retry_scheduled: bool = false
 var _pending_selected_gamemode_retry_scheduled: bool = false
+var _ws_reconnect_in_progress: bool = false
+const WS_RECONNECT_GRACE_SECONDS := 20.0
 
 func _ready() -> void:
 	node_server_url = BackendConfig.get_node_ws_url()
@@ -871,10 +873,25 @@ func _on_connection_failed(reason: String) -> void:
 	if _ws_join_waiting:
 		_ws_join_failed = true
 		_ws_join_fail_reason = reason
+	if _ws_reconnect_in_progress:
+		return
 	var was_in_room: bool = false
+	var room_id: String = ""
+	var map_name: String = str(Global.get_meta("current_room_map", "Frozen Field"))
+	var gamemode: String = str(Global.get_meta("current_room_gamemode", "Deathmatch"))
+	var was_host: bool = false
 	if node_peer != null:
-		was_in_room = node_peer.get_room_id() != "" and node_peer.get_unique_peer_id() > 0
+		room_id = node_peer.get_room_id()
+		was_host = node_peer.is_server()
+		was_in_room = room_id != "" and node_peer.get_unique_peer_id() > 0
+	if room_id == "":
+		room_id = str(Global.get_meta("current_room_id", ""))
 	if Global.connected_to_server or was_in_room:
+		_ws_reconnect_in_progress = true
+		var reconnect_ok: bool = await _attempt_ws_reconnect_with_grace(room_id, was_host, map_name, gamemode, reason)
+		_ws_reconnect_in_progress = false
+		if reconnect_ok:
+			return
 		kick_client(reason)
 		return
 	push_error("Node backend connection failed: " + reason)
@@ -890,6 +907,26 @@ func _on_connection_failed(reason: String) -> void:
 	if global_join_button:
 		global_join_button.text = "Join (Global)"
 		global_join_button.disabled = false
+
+func _attempt_ws_reconnect_with_grace(room_id: String, was_host: bool, map_name: String, gamemode: String, reason: String) -> bool:
+	if room_id == "":
+		return false
+	UIHandler.show_alert("Connection lost. Reconnecting for up to %d seconds..." % int(WS_RECONNECT_GRACE_SECONDS), 4, false, UIHandler.alert_colour_error)
+	var deadline_ms: int = Time.get_ticks_msec() + int(WS_RECONNECT_GRACE_SECONDS * 1000.0)
+	var attempt: int = 0
+	while Time.get_ticks_msec() < deadline_ms:
+		attempt += 1
+		print("[Main] 🔄 Reconnect attempt ", attempt, " room=", room_id, " host=", was_host)
+		if was_host:
+			await _setup_websocket_host(room_id, map_name, gamemode)
+		else:
+			await _setup_websocket_client(room_id)
+		if node_peer != null and node_peer.is_backend_connected() and node_peer.get_room_id() == room_id and Global.connected_to_server:
+			UIHandler.show_alert("Reconnected to room", 3, false, UIHandler.alert_colour_player)
+			return true
+		await get_tree().create_timer(1.5).timeout
+	push_warning("[Main] ❌ Reconnect grace expired. reason=" + reason)
+	return false
 
 func _begin_ws_join_wait() -> void:
 	_ws_join_waiting = true

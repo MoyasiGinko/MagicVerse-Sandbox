@@ -58,11 +58,42 @@ const activeUserRoomLocks = new Map<
 const ROOM_TIMER_SYNC_INTERVAL_MS = 1_000;
 const MATCH_TRANSFER_RETRY_INTERVAL_MS = 10_000;
 const ROOM_SESSION_ENFORCEMENT_INTERVAL_MS = 2_000;
+const RECONNECT_GRACE_MS = 20_000;
 let _matchTransferRetryLoopStarted = false;
 let _matchTransferRetryInProgress = false;
 let _roomTimerSyncLoopStarted = false;
 let _roomSessionEnforcementLoopStarted = false;
+let _reconnectGraceLoopStarted = false;
 const roomTimerLabels = new Map<string, string>();
+const pendingReconnectByUser = new Map<
+  number,
+  {
+    userId: number;
+    roomId: string;
+    expiresAtMs: number;
+  }
+>();
+
+function clearReconnectReservation(userId: number | null): void {
+  if (!userId) {
+    return;
+  }
+  pendingReconnectByUser.delete(userId);
+}
+
+function expireReconnectGraceReservations(): void {
+  const nowMs = Date.now();
+  for (const reservation of pendingReconnectByUser.values()) {
+    if (reservation.expiresAtMs > nowMs) {
+      continue;
+    }
+    pendingReconnectByUser.delete(reservation.userId);
+    roomRepo.removePlayerSession(reservation.userId, reservation.roomId);
+    logInfo(
+      `reconnect grace expired: userId=${reservation.userId} roomId=${reservation.roomId}`,
+    );
+  }
+}
 
 function enforceActiveRoomSessions(): void {
   const sessions = Array.from(clientSessions.values());
@@ -529,7 +560,25 @@ function cleanupClient(ws: WebSocket) {
   }
 
   if (roomId && peerId !== null) {
-    handleRoomDeparture(ws, session, otherAuthenticatedSessions, true);
+    const shouldReserveReconnect =
+      Boolean(userId) && isAuthenticated && !hasOtherAuthenticatedSession;
+    if (shouldReserveReconnect && userId) {
+      pendingReconnectByUser.set(userId, {
+        userId,
+        roomId,
+        expiresAtMs: Date.now() + RECONNECT_GRACE_MS,
+      });
+      logInfo(
+        `reconnect grace started: userId=${userId} roomId=${roomId} expiresInMs=${RECONNECT_GRACE_MS}`,
+      );
+    }
+    handleRoomDeparture(
+      ws,
+      session,
+      otherAuthenticatedSessions,
+      true,
+      shouldReserveReconnect,
+    );
   }
 }
 
@@ -538,6 +587,7 @@ function handleRoomDeparture(
   session: ClientSession,
   otherAuthenticatedSessions: ClientSession[],
   isSocketClosing: boolean,
+  preserveUserSession: boolean = false,
 ): void {
   const { roomId, peerId, userId } = session;
   if (!roomId || peerId === null) {
@@ -566,10 +616,15 @@ function handleRoomDeparture(
     const hasOtherSameUserInRoom = otherAuthenticatedSessions.some(
       (s) => s.roomId === roomId,
     );
-    if (!hasOtherSameUserInRoom) {
+    if (!hasOtherSameUserInRoom && !preserveUserSession) {
       roomRepo.removePlayerSession(userId, roomId);
       console.log(
         `[WebSocket] 🚪 Player ${userId} left room ${roomId} (closing=${isSocketClosing})`,
+      );
+      clearReconnectReservation(userId);
+    } else if (preserveUserSession) {
+      console.log(
+        `[WebSocket] ⏳ Preserving player session for reconnect grace user=${userId} room=${roomId}`,
       );
     } else {
       console.log(
@@ -596,11 +651,17 @@ function handleRoomDeparture(
   }
 
   if (remainingMembers.length === 0) {
-    roomRepo.setRoomActive(roomId, false);
-    roomRepo.deleteRoom(roomId);
-    console.log(
-      `[WebSocket] 🗑️ Room ${roomId} has no users left; marked inactive and deleted`,
-    );
+    if (preserveUserSession) {
+      console.log(
+        `[WebSocket] ⏳ Room ${roomId} empty in-memory but retained for reconnect grace`,
+      );
+    } else {
+      roomRepo.setRoomActive(roomId, false);
+      roomRepo.deleteRoom(roomId);
+      console.log(
+        `[WebSocket] 🗑️ Room ${roomId} has no users left; marked inactive and deleted`,
+      );
+    }
   } else {
     broadcast(room, "peer_left", { peerId }, peerId);
     logInfo(`peer left: roomId=${roomId} peerId=${peerId}`);
@@ -637,6 +698,13 @@ export function setupWebSocket(server: http.Server) {
     setInterval(() => {
       enforceActiveRoomSessions();
     }, ROOM_SESSION_ENFORCEMENT_INTERVAL_MS);
+  }
+
+  if (!_reconnectGraceLoopStarted) {
+    _reconnectGraceLoopStarted = true;
+    setInterval(() => {
+      expireReconnectGraceReservations();
+    }, 1_000);
   }
 
   wss.on("connection", (ws: WebSocket) => {
@@ -861,6 +929,7 @@ export function setupWebSocket(server: http.Server) {
                 message: identity.message,
               });
             }
+            clearReconnectReservation(identity.userId);
 
             if (
               !msg.data ||
