@@ -1,6 +1,7 @@
 import http from "http";
 import https from "https";
 import { URL } from "url";
+import jwt from "jsonwebtoken";
 import { config } from "../config";
 
 export interface MatchPlayerReport {
@@ -16,7 +17,21 @@ export interface MatchReportPayload {
   gamemode?: string;
   winner_user_id?: number | null;
   duration_seconds?: number;
+  started_at?: string;
+  ended_at?: string;
   players: MatchPlayerReport[];
+}
+
+export function getSystemAccessToken(): string {
+  const payload = {
+    userId: 19, // Falls back to admin username search on Django backend if ID is different
+    username: "admin",
+    display_name: "System Game Server",
+  };
+  return jwt.sign(payload, config.jwtSecret, {
+    algorithm: "HS256",
+    expiresIn: "10m",
+  });
 }
 
 const DJANGO_API_BASE_URL = config.djangoApiBaseUrl.replace(/\/+$/, "");

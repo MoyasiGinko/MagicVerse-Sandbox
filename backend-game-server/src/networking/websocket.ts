@@ -8,6 +8,7 @@ import { heartbeatGameServer } from "../integration/djangoRegistry";
 import {
   reportMatchToDjango,
   MatchPlayerReport,
+  getSystemAccessToken,
 } from "../integration/djangoMatchReporter";
 
 type LocalMatchPlayerReport = MatchPlayerReport & {
@@ -176,10 +177,16 @@ async function retryPendingRoomMatchTransfers(): Promise<void> {
     }
 
     for (const pending of pendingMatches) {
-      const accessToken = findAccessTokenForRoom(pending.room_id);
+      let accessToken = findAccessTokenForRoom(pending.room_id);
       if (!accessToken) {
-        // Retry later when an authenticated room participant is connected.
-        continue;
+        try {
+          accessToken = getSystemAccessToken();
+        } catch (tokenErr) {
+          logWarning(
+            `Failed to generate system access token for retry match history id ${pending.id}: ${tokenErr}`,
+          );
+          continue;
+        }
       }
 
       const participants = roomRepo
@@ -203,11 +210,20 @@ async function retryPendingRoomMatchTransfers(): Promise<void> {
       }
 
       try {
+        const startedAtIso = pending.game_started_at_ms
+          ? new Date(pending.game_started_at_ms).toISOString()
+          : undefined;
+        const endedAtIso = pending.game_ended_at_ms
+          ? new Date(pending.game_ended_at_ms).toISOString()
+          : undefined;
+
         const result = await reportMatchToDjango(accessToken, {
           room_id: pending.room_id,
           gamemode: pending.gamemode,
           winner_user_id: pending.winner_user_id,
           duration_seconds: pending.duration_seconds,
+          started_at: startedAtIso,
+          ended_at: endedAtIso,
           players: participants,
         });
         roomRepo.markRoomMatchHistoryTransferred(
@@ -1809,9 +1825,21 @@ export function setupWebSocket(server: http.Server) {
                       players,
                     );
 
-                    const transferToken =
+                    let transferToken =
                       session.accessToken ?? findAccessTokenForRoom(room.id);
+                    if (!transferToken) {
+                      try {
+                        transferToken = getSystemAccessToken();
+                      } catch (tokenErr) {
+                        logWarning(
+                          `gamemode_end fallback system access token generation failed: ${tokenErr}`,
+                        );
+                      }
+                    }
+
                     if (transferToken) {
+                      const startedAtIso = new Date(startedAtMs).toISOString();
+                      const endedAtIso = new Date(endedAtMs).toISOString();
                       logInfo(
                         `gamemode_end transferring to django: roomId=${room.id} players=${players.length}`,
                       );
@@ -1825,6 +1853,8 @@ export function setupWebSocket(server: http.Server) {
                             ? winnerUserId
                             : null,
                         duration_seconds: durationFromPayload,
+                        started_at: startedAtIso,
+                        ended_at: endedAtIso,
                         players,
                       })
                         .then((result) => {
